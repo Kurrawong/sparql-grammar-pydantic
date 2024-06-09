@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "sparql-grammar-pydantic"
+version = "0.1.1"
+description = "Pydantic models for the SPARQL Grammar."
+authors = ["david <david@kurrawong.ai>"]
+readme = "README.md"
+packages = [
+    { include = "sparql_grammar_pydantic" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pydantic = "^2.7.1"
+rdflib = "^7.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
