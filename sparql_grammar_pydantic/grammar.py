@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import List, Union, Optional, Generator, Tuple
+
 from pydantic import BaseModel, field_validator
 from rdflib import URIRef, Variable
 from rdflib.plugins.sparql import prepareQuery
 from rdflib.plugins.sparql.algebra import translateAlgebra
-from typing import List, Union, Optional, Generator, Tuple
 
 log = logging.getLogger(__name__)
 
@@ -59,660 +60,6 @@ class SPARQLGrammarBase(BaseModel):
         return triples
 
 
-class QueryUnit(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rQueryUnit
-    QueryUnit	  ::=  	Query
-    """
-
-    query: Query
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.query.render()
-
-
-class Query(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rQuery
-    Query	  ::=  	Prologue
-    ( SelectQuery | ConstructQuery | DescribeQuery | AskQuery )
-    ValuesClause
-    """
-
-    prologue: Prologue
-    query: Union[SelectQuery, ConstructQuery, DescribeQuery, AskQuery]
-    values_clause: ValuesClause
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.prologue.render()
-        yield "\n"
-        yield from self.query.render()
-        yield from self.values_clause.render()
-
-
-class Prologue(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPrologue
-    Prologue	  ::=  	( BaseDecl | PrefixDecl )*
-    """
-
-    base_decls: Optional[List[BaseDecl]] = None
-    prefix_decls: Optional[List[PrefixDecl]] = None
-
-    def render(self) -> Generator[str, None, None]:
-        if self.base_decls:
-            for base_decl in self.base_decls:
-                yield from base_decl.render()
-        if self.prefix_decls:
-            for prefix_decl in self.prefix_decls:
-                yield from prefix_decl.render()
-
-
-class BaseDecl(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rBaseDecl
-    BaseDecl	  ::=  	'BASE' IRIREF
-    """
-
-    iriref: IRIREF
-
-    def render(self) -> Generator[str, None, None]:
-        yield "BASE "
-        yield from self.iriref.render()
-
-
-class PrefixDecl(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPrefixDecl
-    PrefixDecl	  ::=  	'PREFIX' PNAME_NS IRIREF
-    """
-
-    prefix: str
-    iriref: IRIREF
-
-    def render(self) -> Generator[str, None, None]:
-        yield "PREFIX "
-        yield from self.prefix.render()
-        yield from self.iriref.render()
-
-
-class SelectQuery(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSelectQuery
-    SelectQuery	  ::=  	SelectClause DatasetClause* WhereClause SolutionModifier
-    """
-
-    select_clause: SelectClause
-    dataset_clauses: Optional[List[DatasetClause]] = None
-    where_clause: WhereClause
-    solution_modifier: SolutionModifier
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.select_clause.render()
-        if self.dataset_clauses:
-            for dataset_clause in self.dataset_clauses:
-                yield from dataset_clause.render()
-        yield from self.where_clause.render()
-        yield from self.solution_modifier.render()
-
-
-class SubSelect(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSubSelect
-    SubSelect	  ::=  	SelectClause WhereClause SolutionModifier ValuesClause
-    """
-
-    select_clause: SelectClause
-    where_clause: WhereClause
-    solution_modifier: Optional[SolutionModifier] = None
-    values_clause: Optional[ValuesClause] = None
-
-    def render(self):
-        yield from self.select_clause.render()
-        yield from self.where_clause.render()
-        if self.solution_modifier:
-            yield from self.solution_modifier.render()
-        if self.values_clause:
-            yield from self.values_clause.render()
-
-
-class SelectClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSelectClause
-    SelectClause	  ::=  	'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( ( Var | ( '(' Expression 'AS' Var ')' ) )+ | '*' )
-    """
-
-    distinct: Optional[bool] = None
-    reduced: Optional[bool] = None
-    variables_or_all: Union[List[Union[Var, Tuple[Expression, Var]]], str]
-
-    def render(self):
-        yield "SELECT"
-        if self.distinct:
-            yield " DISTINCT"
-        elif self.reduced:
-            yield " REDUCED"
-        if isinstance(self.variables_or_all, str):
-            yield " *"
-        else:
-            for item in self.variables_or_all:
-                if isinstance(item, Var):
-                    yield " "
-                    yield from item.render()
-                elif isinstance(item, Tuple):
-                    expression, as_var = item
-                    yield " ("
-                    yield from expression.render()
-                    yield " AS "
-                    yield from as_var.render()
-                    yield ")"
-
-
-class ConstructQuery(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rConstructQuery
-    ConstructQuery	  ::=  	'CONSTRUCT' ( ConstructTemplate DatasetClause* WhereClause SolutionModifier | DatasetClause* 'WHERE' '{' TriplesTemplate? '}' SolutionModifier )
-
-    Currently simplified to only accept a ConstructTemplate, WhereClause, and SolutionModifier.
-    """
-
-    construct_template: ConstructTemplate
-    where_clause: WhereClause
-    solution_modifier: SolutionModifier
-
-    def render(self) -> Generator[str, None, None]:
-        yield "CONSTRUCT "
-        yield from self.construct_template.render()
-        yield from self.where_clause.render()
-        yield from self.solution_modifier.render()
-
-
-class DescribeQuery(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDescribeQuery
-    DescribeQuery	  ::=  	'DESCRIBE' ( VarOrIri+ | '*' ) DatasetClause* WhereClause? SolutionModifier
-    """
-
-    varoriri_or_all: Union[VarOrIri, str]
-    dataset_clauses: Optional[List[DatasetClause]] = None
-    where_clause: Optional[WhereClause] = None
-    solution_modifier: SolutionModifier
-
-    def render(self) -> Generator[str, None, None]:
-        yield "DESCRIBE "
-        if isinstance(self.varoriri_or_all, str):
-            yield "*"
-        else:
-            yield from self.varoriri_or_all.render()
-        if self.dataset_clauses:
-            for dataset_clause in self.dataset_clauses:
-                yield from dataset_clause.render()
-        if self.where_clause:
-            yield from self.where_clause.render()
-        yield from self.solution_modifier.render()
-
-
-class AskQuery(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rAskQuery
-    AskQuery	  ::=  	'ASK' DatasetClause* WhereClause SolutionModifier
-    """
-
-    dataset_clauses: Optional[List[DatasetClause]] = None
-    where_clause: WhereClause
-    solution_modifier: SolutionModifier
-
-    def render(self) -> Generator[str, None, None]:
-        yield "ASK "
-        if self.dataset_clauses:
-            for dataset_clause in self.dataset_clauses:
-                yield from dataset_clause.render()
-        yield from self.where_clause.render()
-        yield from self.solution_modifier.render()
-
-
-class DatasetClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDatasetClause
-    DatasetClause	  ::=  	'FROM' ( DefaultGraphClause | NamedGraphClause )
-    """
-
-    default_or_named_graph_clause: DefaultGraphClause | NamedGraphClause
-
-    def render(self) -> Generator[str, None, None]:
-        yield "FROM "
-        yield from self.default_or_named_graph_clause.render()
-
-
-class DefaultGraphClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDefaultGraphClause
-    DefaultGraphClause	  ::=  	SourceSelector
-    """
-
-    source_selector: SourceSelector
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.source_selector.render()
-
-
-class NamedGraphClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rNamedGraphClause
-    NamedGraphClause	  ::=  	'NAMED' SourceSelector
-    """
-
-    source_selector: SourceSelector
-
-    def render(self) -> Generator[str, None, None]:
-        yield "NAMED "
-        yield from self.source_selector.render()
-
-
-class SourceSelector(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSourceSelector
-    SourceSelector	  ::=  	iri
-    """
-
-    iri: iri
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.iri.render()
-
-
-class WhereClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rWhereClause
-    WhereClause	  ::=  	'WHERE'? GroupGraphPattern
-    """
-
-    group_graph_pattern: GroupGraphPattern
-
-    def render(self) -> Generator[str, None, None]:
-        yield "\nWHERE "
-        yield from self.group_graph_pattern.render()
-
-
-class SolutionModifier(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSolutionModifier
-    SolutionModifier	  ::=  	GroupClause? HavingClause? OrderClause? LimitOffsetClauses?
-    """
-
-    group_by: Optional[GroupClause] = None
-    having: Optional[HavingClause]
-    order_by: Optional[OrderClause] = None
-    limit_offset: Optional[LimitOffsetClauses] = None
-
-    def render(self) -> str:
-        if self.order_by:
-            yield from self.order_by.render()
-        if self.limit_offset:
-            if self.order_by:
-                yield "\n"
-            yield from self.limit_offset.render()
-        if self.group_by:
-            yield from self.group_by.render()
-
-
-class GroupClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rGroupClause
-    GroupClause ::= 'GROUP' 'BY' GroupCondition+
-    """
-
-    group_conditions: List["GroupCondition"]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "\nGROUP BY "
-        for i, condition in enumerate(self.group_conditions):
-            yield from condition.render()
-            if i < len(self.group_conditions) - 1:  # Check if it's not the last triple
-                yield " "
-
-
-class GroupCondition(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rGroupCondition
-    GroupCondition ::= BuiltInCall | FunctionCall | '(' Expression ( 'AS' Var )? ')' | Var
-    """
-
-    condition: Union[BuiltInCall, FunctionCall, Tuple[Expression, Var], Var]
-
-    def render(self) -> Generator[str, None, None]:
-        if isinstance(self.condition, Tuple):
-            yield "("
-            yield from self.condition[0].render()
-            yield " AS "
-            yield from self.condition[1].render()
-            yield ")"
-        else:
-            yield from self.condition.render()
-
-
-class HavingClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rHavingClause
-    HavingClause	  ::=  	'HAVING' HavingCondition+
-    """
-
-    having_conditions: List[HavingCondition]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "\nHAVING "
-        for i, condition in enumerate(self.having_conditions):
-            yield from condition.render()
-            if i < len(self.having_conditions) - 1:  # Check if it's not the last triple
-                yield " "
-
-
-class HavingCondition(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rHavingCondition
-    HavingCondition	  ::=  	Constraint
-    """
-
-    constraint: Constraint
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.constraint.render()
-
-
-class OrderClause(SPARQLGrammarBase):
-    conditions: List[OrderCondition]
-
-    def render(self):
-        yield "\nORDER BY "
-        yield " ".join(
-            part for condition in self.conditions for part in condition.render()
-        )
-
-
-class OrderCondition(SPARQLGrammarBase):
-    """
-    Default direction is ASC if not specified
-    """
-
-    var: Var
-    direction: Optional[str] = None
-
-    def render(self):
-        if self.direction:
-            yield f"{self.direction}("
-            yield from self.var.render()
-            yield ")"
-        else:
-            yield from self.var.render()
-
-
-class LimitOffsetClauses(SPARQLGrammarBase):
-    """
-    Represents the LIMIT and OFFSET clauses in SPARQL queries.
-    According to the SPARQL grammar:
-    LimitOffsetClauses ::= LimitClause OffsetClause? | OffsetClause LimitClause?
-    """
-
-    limit_clause: Optional[LimitClause] = None
-    offset_clause: Optional[OffsetClause] = None
-
-    def render(self) -> Generator[str, None, None]:
-        if self.limit_clause:
-            yield from self.limit_clause.render()
-        if self.offset_clause:
-            if self.limit_clause:
-                yield "\n"
-            yield from self.offset_clause.render()
-
-
-class LimitClause(SPARQLGrammarBase):
-    limit: int
-
-    def render(self) -> Generator[str, None, None]:
-        yield f"LIMIT {self.limit}"
-
-
-class OffsetClause(SPARQLGrammarBase):
-    offset: int
-
-    def render(self) -> Generator[str, None, None]:
-        yield f"OFFSET {self.offset}"
-
-
-class ValuesClause(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rValuesClause
-    ValuesClause	  ::=  	( 'VALUES' DataBlock )?
-    """
-
-    data_block: Optional[DataBlock]
-
-    def render(self) -> Generator[str, None, None]:
-        if self.data_block:
-            yield "\n\tVALUES "
-            yield from self.data_block.render()
-
-
-class Update(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rUpdate
-    Update ::= Prologue ( Update1 ( ';' Update )? )?
-    """
-
-    prologue: Optional[Prologue] = None
-    update1: Optional["Update1"] = None
-    update: Optional["Update"] = None
-
-    def render(self) -> Generator[str, None, None]:
-        if self.prologue:
-            yield from self.prologue.render()
-        if self.update1:
-            yield from self.update1.render()
-        if self.update:
-            yield "; "
-            yield from self.update.render()
-
-
-class Update1(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rUpdate1
-    Update1 ::= Load | Clear | Drop | Add | Move | Copy | Create | InsertData | DeleteData | DeleteWhere | Modify
-    """
-
-    update1: Union[
-        Load,
-        Clear,
-        Drop,
-        Add,
-        Move,
-        Copy,
-        Create,
-        InsertData,
-        DeleteData,
-        DeleteWhere,
-        Modify,
-    ]
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.update1.render()
-
-
-class Load(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rLoad
-    Load ::= 'LOAD' 'SILENT'? iri ( 'INTO' GraphRef )?
-    """
-
-    silent: bool = False
-    iri: iri
-    graph_ref: Optional[GraphRef] = None
-
-    def render(self) -> Generator[str, None, None]:
-        yield "LOAD "
-        if self.silent:
-            yield "SILENT "
-        yield from self.iri.render()
-        if self.graph_ref:
-            yield " INTO "
-            yield from self.graph_ref.render()
-
-
-class Clear(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rClear
-    Clear ::= 'CLEAR' 'SILENT'? GraphRefAll
-    """
-
-    silent: bool = False
-    graph_ref_all: GraphRefAll
-
-    def render(self) -> Generator[str, None, None]:
-        yield "CLEAR "
-        if self.silent:
-            yield "SILENT "
-        yield from self.graph_ref_all.render()
-
-
-class Drop(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rDrop
-    Drop ::= 'DROP' 'SILENT'? GraphRefAll
-    """
-
-    silent: bool = False
-    graph_ref_all: GraphRefAll
-
-    def render(self) -> Generator[str, None, None]:
-        yield "DROP "
-        if self.silent:
-            yield "SILENT "
-        yield from self.graph_ref_all.render()
-
-
-class Create(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rCreate
-    Create ::= 'CREATE' 'SILENT'? GraphRef
-    """
-
-    silent: bool = False
-    graph_ref: GraphRef
-
-    def render(self) -> Generator[str, None, None]:
-        yield "CREATE "
-        if self.silent:
-            yield "SILENT "
-        yield from self.graph_ref.render()
-
-
-class Add(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rAdd
-    Add ::= 'ADD' 'SILENT'? GraphOrDefault 'TO' GraphOrDefault
-    """
-
-    silent: bool = False
-    from_graph: GraphOrDefault
-    to_graph: GraphOrDefault
-
-    def render(self) -> Generator[str, None, None]:
-        yield "ADD "
-        if self.silent:
-            yield "SILENT "
-        yield from self.from_graph.render()
-        yield " TO "
-        yield from self.to_graph.render()
-
-
-class Move(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rMove
-    Move ::= 'MOVE' 'SILENT'? GraphOrDefault 'TO' GraphOrDefault
-    """
-
-    silent: bool = False
-    from_graph: GraphOrDefault
-    to_graph: GraphOrDefault
-
-    def render(self) -> Generator[str, None, None]:
-        yield "MOVE "
-        if self.silent:
-            yield "SILENT "
-        yield from self.from_graph.render()
-        yield " TO "
-        yield from self.to_graph.render()
-
-
-class Copy(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rCopy
-    Copy ::= 'COPY' 'SILENT'? GraphOrDefault 'TO' GraphOrDefault
-    """
-
-    silent: bool = False
-    from_graph: GraphOrDefault
-    to_graph: GraphOrDefault
-
-    def render(self) -> Generator[str, None, None]:
-        yield "COPY "
-        if self.silent:
-            yield "SILENT "
-        yield from self.from_graph.render()
-        yield " TO "
-        yield from self.to_graph.render()
-
-
-class InsertData(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rInsertData
-    InsertData ::= 'INSERT DATA' QuadData
-    """
-
-    quad_data: QuadData
-
-    def render(self) -> Generator[str, None, None]:
-        yield "INSERT DATA "
-        yield from self.quad_data.render()
-
-
-class DeleteData(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rDeleteData
-    DeleteData ::= 'DELETE DATA' QuadData
-    """
-
-    quad_data: QuadData
-
-    def render(self) -> Generator[str, None, None]:
-        yield "DELETE DATA "
-        yield from self.quad_data.render()
-
-
-class DeleteWhere(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-update/#rDeleteWhere
-    DeleteWhere ::= 'DELETE WHERE' QuadPattern
-    """
-
-    quad_pattern: QuadPattern
-
-    def render(self) -> Generator[str, None, None]:
-        yield "DELETE WHERE "
-        yield from self.quad_pattern.render()
-
-
-class Constraint(SPARQLGrammarBase):
-    """
-    Represents a SPARQL Constraint.
-    Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
-    """
-
-    content: Union[BrackettedExpression, BuiltInCall, FunctionCall]
-
-    def render(self) -> Generator[str, None, None]:
-        yield from self.content.render()
-
-
 class BlankNodeLabel(SPARQLGrammarBase):
     """
     BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
@@ -743,7 +90,6 @@ class Var(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rVar
     Var	  ::=  	VAR1 | VAR2
     """
-
     value: str
 
     def render(self) -> Generator[str, None, None]:
@@ -753,7 +99,7 @@ class Var(SPARQLGrammarBase):
         return hash(self.value)
 
 
-class iri(SPARQLGrammarBase):
+class IRI(SPARQLGrammarBase):
     """
     Represents a SPARQL iri.
     iri ::= IRIREF | PrefixedName
@@ -790,12 +136,13 @@ class BlankNode(SPARQLGrammarBase):
 
 class RDFLiteral(SPARQLGrammarBase):
     """
+    https://www.w3.org/TR/sparql11-query/#rRDFLiteral
     RDFLiteral	  ::=  	String ( LANGTAG | ( '^^' iri ) )?
     """
 
     value: str
     langtag: Optional[LANGTAG] = None
-    datatype: Optional[iri] = None
+    datatype: Optional[IRI] = None
 
     def render(self) -> Generator[str, None, None]:
         yield f'"{self.value}"'
@@ -847,12 +194,31 @@ class NumericLiteral(SPARQLGrammarBase):
         return hash(self.value)
 
 
+# class SimplifiedTriple(SPARQLGrammarBase):
+#     """A simplified implmementation the triple pattern matches in the SPARQL grammar, to avoid implementing many classes
+#     such as TriplesSameSubjectPath"""
+#
+#     subject: Union[IRI, Var, BlankNode]
+#     predicate: Union[IRI, Var]
+#     object: Union[IRI, RDFLiteral, Var, BlankNode, NumericLiteral]
+#
+#     def render(self) -> Generator[str, None, None]:
+#         yield from self.subject.render()
+#         yield " "
+#         yield from self.predicate.render()
+#         yield " "
+#         yield from self.object.render()
+#         yield " ."
+
+# def __hash__(self):
+#     return hash((self.subject, self.predicate, self.object))
+
+
 class TriplesBlock(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rTriplesBlock
     TriplesBlock	  ::=  	TriplesSameSubjectPath ( '.' TriplesBlock? )?
     """
-
     triples: TriplesSameSubjectPath = None
     triples_block: Optional[TriplesBlock] = None
 
@@ -1007,7 +373,7 @@ class ConditionalOrExpression(SPARQLGrammarBase):
 
     def render(self) -> Generator[str, None, None]:
         for i, conditional_and_expression in enumerate(
-            self.conditional_and_expressions
+                self.conditional_and_expressions
         ):
             yield from conditional_and_expression.render()
             if i < len(self.conditional_and_expressions) - 1:
@@ -1025,9 +391,7 @@ class Expression(SPARQLGrammarBase):
         yield from self.conditional_or_expression.render()
 
     @classmethod
-    def from_primary_expression(
-        cls, primary_expression: PrimaryExpression
-    ) -> Expression:
+    def from_primary_expression(cls, primary_expression: PrimaryExpression) -> Expression:
         """
         Convenience method to create an Expression directly from a Var, wrapped in a PrimaryExpression.
         """
@@ -1057,10 +421,10 @@ class Expression(SPARQLGrammarBase):
 
     @classmethod
     def create_in_expression(
-        cls,
-        left_primary_expression: PrimaryExpression,
-        operator: str,  # "IN" or "NOT IN"
-        right_primary_expressions: List[PrimaryExpression],
+            cls,
+            left_primary_expression: PrimaryExpression,
+            operator: str,  # "IN" or "NOT IN"
+            right_primary_expressions: List[PrimaryExpression],
     ) -> Expression:
         """ """
         return cls(
@@ -1128,7 +492,7 @@ class DataBlockValue(SPARQLGrammarBase):
     DataBlockValue	  ::=  	iri | RDFLiteral | NumericLiteral | BooleanLiteral | 'UNDEF'
     """
 
-    value: Union[iri, RDFLiteral, NumericLiteral, BooleanLiteral, str]
+    value: Union[IRI, RDFLiteral, NumericLiteral, BooleanLiteral, str]
 
     @field_validator("value")
     def check_string_is_undef(cls, v):
@@ -1196,6 +560,20 @@ class InlineData(SPARQLGrammarBase):
     def render(self) -> Generator[str, None, None]:
         yield "\n\tVALUES "
         yield from self.data_block.render()
+
+
+class ValuesClause(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rValuesClause
+    ValuesClause	  ::=  	( 'VALUES' DataBlock )?
+    """
+
+    data_block: Optional[DataBlock]
+
+    def render(self) -> Generator[str, None, None]:
+        if self.data_block:
+            yield "\n\tVALUES "
+            yield from self.data_block.render()
 
 
 class GraphPatternNotTriples(SPARQLGrammarBase):
@@ -1278,11 +656,62 @@ class GroupGraphPatternSub(SPARQLGrammarBase):
 #             self.patterns.append(triples)
 
 
+class SelectClause(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rSelectClause
+    SelectClause	  ::=  	'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( ( Var | ( '(' Expression 'AS' Var ')' ) )+ | '*' )
+    """
+
+    distinct: Optional[bool] = None
+    reduced: Optional[bool] = None
+    variables_or_all: Union[List[Union[Var, Tuple[Expression, Var]]], str]
+
+    def render(self):
+        yield "SELECT"
+        if self.distinct:
+            yield " DISTINCT"
+        elif self.reduced:
+            yield " REDUCED"
+        if isinstance(self.variables_or_all, str):
+            yield " *"
+        else:
+            for item in self.variables_or_all:
+                if isinstance(item, Var):
+                    yield " "
+                    yield from item.render()
+                elif isinstance(item, Tuple):
+                    expression, as_var = item
+                    yield " ("
+                    yield from expression.render()
+                    yield " AS "
+                    yield from as_var.render()
+                    yield ")"
+
+
+class SubSelect(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rSubSelect
+    SubSelect	  ::=  	SelectClause WhereClause SolutionModifier ValuesClause
+    """
+
+    select_clause: SelectClause
+    where_clause: WhereClause
+    solution_modifier: Optional[SolutionModifier] = None
+    values_clause: Optional[ValuesClause] = None
+
+    def render(self):
+        yield from self.select_clause.render()
+        yield from self.where_clause.render()
+        if self.solution_modifier:
+            yield from self.solution_modifier.render()
+        if self.values_clause:
+            yield from self.values_clause.render()
+
+
 class SubSelectString(SubSelect):
     """Inherits from the SubSelect class such that it can be used as a drop in replacement where a subselect is provided
     as text, such as via sh:target / sh:select. NB by providing a subquery this way, the query cannot be validated. Use
-    of translateAlgebra will to some extent "validate" the query though, and will expand any prefixes known to RDFLib.
-    """
+    of translateAlgebra will to some extent "validate" the query though, and will expand any prefixes known to RDFLib."""
 
     select_clause: Optional[str] = None
     where_clause: Optional[str] = None
@@ -1332,10 +761,10 @@ class Filter(SPARQLGrammarBase):
 
     @classmethod
     def filter_relational(
-        cls,
-        focus: PrimaryExpression,
-        comparators: Union[PrimaryExpression, List[PrimaryExpression]],
-        operator: str,
+            cls,
+            focus: PrimaryExpression,
+            comparators: Union[PrimaryExpression, List[PrimaryExpression]],
+            operator: str,
     ) -> Filter:
         """
         Convenience method to create a FILTER clause to compare the focus node to comparators.
@@ -1386,6 +815,18 @@ class Filter(SPARQLGrammarBase):
         return cls(constraint=Constraint(content=bracketted_expr))
 
 
+class Constraint(SPARQLGrammarBase):
+    """
+    Represents a SPARQL Constraint.
+    Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
+    """
+
+    content: Union[BrackettedExpression, BuiltInCall, FunctionCall]
+
+    def render(self) -> Generator[str, None, None]:
+        yield from self.content.render()
+
+
 class FunctionCall(SPARQLGrammarBase):
     """
     FunctionCall	  ::=  	iri ArgList
@@ -1393,7 +834,7 @@ class FunctionCall(SPARQLGrammarBase):
     FunctionCall ::= iri ArgList
     """
 
-    iri: iri
+    iri: IRI
     arg_list: ArgList
 
     def render(self) -> Generator[str, None, None]:
@@ -1474,15 +915,130 @@ class GroupOrUnionGraphPattern(SPARQLGrammarBase):
             yield from ggp.render()
 
 
+class LimitClause(SPARQLGrammarBase):
+    limit: int
+
+    def render(self) -> Generator[str, None, None]:
+        yield f"LIMIT {self.limit}"
+
+
+class OffsetClause(SPARQLGrammarBase):
+    offset: int
+
+    def render(self) -> Generator[str, None, None]:
+        yield f"OFFSET {self.offset}"
+
+
+class OrderCondition(SPARQLGrammarBase):
+    """
+    Default direction is ASC if not specified
+    """
+
+    var: Var
+    direction: Optional[str] = None
+
+    def render(self):
+        if self.direction:
+            yield f"{self.direction}("
+            yield from self.var.render()
+            yield ")"
+        else:
+            yield from self.var.render()
+
+
+class OrderClause(SPARQLGrammarBase):
+    conditions: List[OrderCondition]
+
+    def render(self):
+        yield "\nORDER BY "
+        yield " ".join(
+            part for condition in self.conditions for part in condition.render()
+        )
+
+
+class LimitOffsetClauses(SPARQLGrammarBase):
+    """
+    Represents the LIMIT and OFFSET clauses in SPARQL queries.
+    According to the SPARQL grammar:
+    LimitOffsetClauses ::= LimitClause OffsetClause? | OffsetClause LimitClause?
+    """
+
+    limit_clause: Optional[LimitClause] = None
+    offset_clause: Optional[OffsetClause] = None
+
+    def render(self) -> Generator[str, None, None]:
+        if self.limit_clause:
+            yield from self.limit_clause.render()
+        if self.offset_clause:
+            if self.limit_clause:
+                yield "\n"
+            yield from self.offset_clause.render()
+
+
+class SolutionModifier(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rSolutionModifier
+    SolutionModifier	  ::=  	GroupClause? HavingClause? OrderClause? LimitOffsetClauses?
+    """
+
+    order_by: Optional[OrderClause] = None
+    limit_offset: Optional[LimitOffsetClauses] = None
+    # having: Optional[HavingClause]
+    group_by: Optional[GroupClause] = None
+
+    def render(self) -> str:
+        if self.order_by:
+            yield from self.order_by.render()
+        if self.limit_offset:
+            if self.order_by:
+                yield "\n"
+            yield from self.limit_offset.render()
+        if self.group_by:
+            yield from self.group_by.render()
+
+
+class GroupClause(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rGroupClause
+    GroupClause ::= 'GROUP' 'BY' GroupCondition+
+    """
+
+    group_conditions: List["GroupCondition"]
+
+    def render(self) -> Generator[str, None, None]:
+        yield "\nGROUP BY "
+        for i, condition in enumerate(self.group_conditions):
+            yield from condition.render()
+            if i < len(self.group_conditions) - 1:  # Check if it's not the last triple
+                yield " "
+
+
+class GroupCondition(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rGroupCondition
+    GroupCondition ::= BuiltInCall | FunctionCall | '(' Expression ( 'AS' Var )? ')' | Var
+    """
+
+    condition: Union[BuiltInCall, FunctionCall, Tuple[Expression, Var], Var]
+
+    def render(self) -> Generator[str, None, None]:
+        if isinstance(self.condition, Tuple):
+            yield "("
+            yield from self.condition[0].render()
+            yield " AS "
+            yield from self.condition[1].render()
+            yield ")"
+        else:
+            yield from self.condition.render()
+
+
 class TriplesSameSubject(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rTriplesSameSubject
     TriplesSameSubject	  ::=  	VarOrTerm PropertyListNotEmpty | TriplesNode PropertyList
     """
 
-    content: Union[
-        Tuple[VarOrTerm, PropertyListNotEmpty] | Tuple[TriplesNode, PropertyList]
-    ]
+    content: Union[Tuple[VarOrTerm, PropertyListNotEmpty] | Tuple[TriplesNode, PropertyList]]
 
     def render(self):
         yield from self.content[0].render()
@@ -1493,59 +1049,53 @@ class TriplesSameSubject(SPARQLGrammarBase):
         return hash(self.content)
 
     @classmethod
-    def from_spo(
-        cls,
-        subject: Var | iri | BlankNode,
-        predicate: Var | iri,
-        object: Var | iri | BlankNode,
-    ):
+    def from_spo(cls, subject: Var | IRI | BlankNode, predicate: Var | IRI, object: Var | IRI | BlankNode):
         """
         Convenience method to create a TriplesSameSubject from a subject, predicate, and object.
-        Currently supports only Var and iri types for subject, predicate, and object.
+        Currently supports only Var and IRI types for subject, predicate, and object.
         """
         # Handle subjects
         if isinstance(subject, Var):
             s_vot = VarOrTerm(varorterm=subject)
-        elif isinstance(subject, (iri, BlankNode)):
+        elif isinstance(subject, (IRI, BlankNode)):
             s_vot = VarOrTerm(varorterm=GraphTerm(content=subject))
         else:
-            raise ValueError("s must be a Var, iri or BlankNode")
+            raise ValueError("s must be a Var, IRI or BlankNode")
 
         # Handle predicates
-        if isinstance(predicate, (Var, iri)):
+        if isinstance(predicate, (Var, IRI)):
             verb = Verb(varoriri=VarOrIri(varoriri=predicate))
         else:
-            raise ValueError("p must be a Var or iri")
+            raise ValueError("p must be a Var or IRI")
 
         # Handle objects
         if isinstance(object, Var):
             o_vot = VarOrTerm(varorterm=object)
-        elif isinstance(object, (iri, BlankNode)):
+        elif isinstance(object, (IRI, BlankNode)):
             o_vot = VarOrTerm(varorterm=GraphTerm(content=object))
         else:
-            raise ValueError("o must be a Var, iri or BlankNode")
+            raise ValueError("o must be a Var, IRI or BlankNode")
 
         return cls(
             content=(
                 s_vot,
                 PropertyListNotEmpty(
-                    verb_objectlist=[
-                        (
-                            verb,
-                            ObjectList(
-                                list_object=[
-                                    Object(
-                                        graphnode=GraphNode(
-                                            varorterm_or_triplesnode=o_vot
-                                        )
+                    verb_objectlist=[(
+                        verb,
+                        ObjectList(
+                            list_object=[
+                                Object(
+                                    graphnode=GraphNode(
+                                        varorterm_or_triplesnode=o_vot
                                     )
-                                ]
-                            ),
+                                )
+                            ]
                         )
-                    ]
-                ),
+                    )]
+                )
             )
         )
+
 
 
 class ConstructTriples(SPARQLGrammarBase):
@@ -1572,7 +1122,7 @@ class ConstructTriples(SPARQLGrammarBase):
             try:
                 ct = cls(triples=tss, construct_triples=ct)
             except Exception as e:
-                print("")
+                print('')
         return ct
 
     def to_tss_list(self):
@@ -1590,9 +1140,7 @@ class ConstructTriples(SPARQLGrammarBase):
         """
         ct_iter = iter(ct_list)
         try:
-            first_ct = next(
-                ct_iter
-            )  # Start with the first ConstructTriples in the list
+            first_ct = next(ct_iter)  # Start with the first ConstructTriples in the list
         except StopIteration:
             return None  # Return None if the list is empty
 
@@ -1626,14 +1174,44 @@ class ConstructTemplate(SPARQLGrammarBase):
         return hash(self.construct_triples)
 
 
+class WhereClause(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rWhereClause
+    WhereClause	  ::=  	'WHERE'? GroupGraphPattern
+    """
+
+    group_graph_pattern: GroupGraphPattern
+
+    def render(self) -> Generator[str, None, None]:
+        yield "\nWHERE "
+        yield from self.group_graph_pattern.render()
+
+
+class ConstructQuery(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rConstructQuery
+    ConstructQuery	  ::=  	'CONSTRUCT' ( ConstructTemplate DatasetClause* WhereClause SolutionModifier | DatasetClause* 'WHERE' '{' TriplesTemplate? '}' SolutionModifier )
+
+    Currently simplified to only accept a ConstructTemplate, WhereClause, and SolutionModifier.
+    """
+
+    construct_template: ConstructTemplate
+    where_clause: WhereClause
+    solution_modifier: SolutionModifier
+
+    def render(self) -> Generator[str, None, None]:
+        yield "CONSTRUCT "
+        yield from self.construct_template.render()
+        yield from self.where_clause.render()
+        yield from self.solution_modifier.render()
+
+
 class BuiltInCall(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rBuiltInCall
     """
 
-    other_expressions: Optional[
-        Union[Aggregate, RegexExpression, ExistsFunc, NotExistsFunc]
-    ] = None
+    other_expressions: Optional[Union[Aggregate, RegexExpression, ExistsFunc, NotExistsFunc]] = None
     function_name: Optional[str] = None
     arguments: Optional[
         List[Union[Expression, Tuple[Expression], ExpressionList, Var, NIL]]
@@ -1642,55 +1220,17 @@ class BuiltInCall(SPARQLGrammarBase):
     @field_validator("function_name")
     def validate_function_name(cls, v):
         implemented = [
-            "STR",
-            "LANG",
-            "LANGMATCHES",
-            "DATATYPE",
-            "BOUND",
-            "iri",
-            "URI",
-            "BNODE",
-            "RAND",
-            "ABS",
-            "CEIL",
-            "FLOOR",
-            "ROUND",
-            "CONCAT",
-            "STRLEN",
-            "UCASE",
-            "LCASE",
-            "ENCODE_FOR_URI",
-            "CONTAINS",
-            "STRSTARTS",
-            "STRENDS",
-            "STRBEFORE",
-            "STRAFTER",
-            "YEAR",
-            "MONTH",
-            "DAY",
-            "HOURS",
-            "MINUTES",
-            "SECONDS",
-            "TIMEZONE",
-            "TZ",
-            "NOW",
-            "UUID",
-            "STRUUID",
-            "MD5",
-            "SHA1",
-            "SHA256",
-            "SHA384",
-            "SHA512",
-            "COALESCE",
             "IF",
-            "STRLANG",
-            "STRDT",
-            "sameTerm",
-            "isIRI",
+            "STR",
+            "URI",
+            "STR",
+            "CONCAT",
+            "SHA256",
+            "LCASE",
             "isURI",
             "isBLANK",
-            "isLITERAL",
-            "isNUMERIC",
+            "LANG",
+            "LANGMATCHES",
         ]
         if v not in implemented:
             raise ValueError(
@@ -1712,7 +1252,7 @@ class BuiltInCall(SPARQLGrammarBase):
 
     @classmethod
     def create_with_one_expr(
-        cls, function_name: str, expression: PrimaryExpression
+            cls, function_name: str, expression: PrimaryExpression
     ) -> BuiltInCall:
         """
         Convenience method for functions that take a single PrimaryExpression as an argument.
@@ -1722,15 +1262,13 @@ class BuiltInCall(SPARQLGrammarBase):
 
     @classmethod
     def create_with_n_expr(
-        cls, function_name: str, expressions: List[PrimaryExpression]
+            cls, function_name: str, expressions: List[PrimaryExpression]
     ) -> BuiltInCall:
         """
         Convenience method for functions that take a list of PrimaryExpressions as arguments.
         Wraps each PrimaryExpression in an Expression.
         """
-        wrapped_expressions = [
-            Expression.from_primary_expression(pe) for pe in expressions
-        ]
+        wrapped_expressions = [Expression.from_primary_expression(pe) for pe in expressions]
 
         # Create a BuiltInCall instance for the specified function with the list of wrapped expressions
         return cls(function_name=function_name, arguments=wrapped_expressions)
@@ -1749,7 +1287,7 @@ class GraphTerm(SPARQLGrammarBase):
     GraphTerm ::= iri | RDFLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL
     """
 
-    content: Union[iri, RDFLiteral, NumericLiteral, BooleanLiteral, BlankNode, NIL]
+    content: Union[IRI, RDFLiteral, NumericLiteral, BooleanLiteral, BlankNode, NIL]
 
     def render(self) -> Generator[str, None, None]:
         yield from self.content.render()
@@ -1763,7 +1301,7 @@ class IRIOrFunction(SPARQLGrammarBase):
     iriOrFunction	  ::=  	iri ArgList?
     """
 
-    iri: iri
+    iri: IRI
     arg_list: Optional[ArgList] = None
 
     def render(self) -> Generator[str, None, None]:
@@ -1801,13 +1339,11 @@ class Aggregate(SPARQLGrammarBase):
     | 'GROUP_CONCAT' '(' 'DISTINCT'? Expression ( ';' 'SEPARATOR' '=' String )? ')'
     """
 
-    function_name: (
-        str  # One of 'COUNT', 'SUM', 'MIN', 'MAX', 'AVG', 'SAMPLE', 'GROUP_CONCAT'
-    )
+    function_name: str  # One of 'COUNT', 'SUM', 'MIN', 'MAX', 'AVG', 'SAMPLE', 'GROUP_CONCAT'
     distinct: Optional[bool] = None
-    expression: Optional[Union[str, Expression]] = (
-        None  # '*' for COUNT, else Expression
-    )
+    expression: Optional[
+        Union[str, Expression]
+    ] = None  # '*' for COUNT, else Expression
     separator: Optional[str] = None  # Only used for GROUP_CONCAT
 
     @field_validator("function_name")
@@ -1867,12 +1403,23 @@ class RegexExpression(SPARQLGrammarBase):
         yield ")"
 
 
+# class QueryUnit(SPARQLGrammarBase):
+#     query: Query
+#
+#     def render(self) -> Generator[str, None, None]:
+#         yield from self.query.render()
+#
+#
+# class Query(SPARQLGrammarBase):
+#     prologue: Prologue
+#     query: Union[SelectQuery, ConstructQuery, DescribeQuery, AskQuery]
+#     values_clause: ValuesClause
+
 class VerbPath(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rVerbPath
     VerbPath	  ::=  	Path
     """
-
     path: SG_Path
 
     def render(self) -> Generator[str, None, None]:
@@ -1887,7 +1434,6 @@ class VerbSimple(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rVerbSimple
     VerbSimple	  ::=  	Var
     """
-
     var: Var
 
     def render(self) -> Generator[str, None, None]:
@@ -1902,7 +1448,6 @@ class ObjectListPath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rObjectListPath
     ObjectListPath	  ::=  	ObjectPath ( ',' ObjectPath )*
     """
-
     object_paths: List[ObjectPath]
 
     def render(self):
@@ -1922,7 +1467,6 @@ class ObjectPath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rObjectPath
     ObjectPath	  ::=  	GraphNodePath
     """
-
     graph_node_path: GraphNodePath
 
     def render(self) -> Generator[str, None, None]:
@@ -1937,7 +1481,6 @@ class SG_Path(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPath
     Path	  ::=  	PathAlternative
     """
-
     path_alternative: PathAlternative
 
     def render(self) -> Generator[str, None, None]:
@@ -1952,13 +1495,12 @@ class PathAlternative(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathAlternative
     PathAlternative	  ::=  	PathSequence ( '|' PathSequence )*
     """
-
     sequence_paths: List[PathSequence]
 
     @field_validator("sequence_paths")
     def must_contain_at_least_one_item(cls, v):
         if len(v) == 0:
-            raise ValueError("sequence_paths must contain at least one item.")
+            raise ValueError('sequence_paths must contain at least one item.')
         return v
 
     def render(self):
@@ -1985,7 +1527,7 @@ class PathSequence(SPARQLGrammarBase):
     @field_validator("list_path_elt_or_inverse")
     def must_contain_at_least_one_item(cls, v):
         if len(v) == 0:
-            raise ValueError("list_path_elt_or_inverse must contain at least one item.")
+            raise ValueError('list_path_elt_or_inverse must contain at least one item.')
         return v
 
     def render(self):
@@ -2006,7 +1548,6 @@ class PathElt(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathElt
     PathElt	  ::=  	PathPrimary PathMod?
     """
-
     path_primary: PathPrimary
     path_mod: Optional[PathMod] = None
 
@@ -2024,7 +1565,6 @@ class PathEltOrInverse(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathEltOrInverse
     PathEltOrInverse	  ::=  	PathElt | '^' PathElt
     """
-
     path_elt: PathElt
     inverse: bool = False
 
@@ -2042,7 +1582,6 @@ class PathMod(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathMod
     PathMod	  ::=  	'?' | '*' | '+'
     """
-
     pathmod: str
 
     def render(self):
@@ -2052,7 +1591,9 @@ class PathMod(SPARQLGrammarBase):
     def validate_function_name(cls, v):
         # TODO there's pydantic enumeration type that can be used on the type
         if v not in ["?", "*", "+"]:
-            raise ValueError("PathMod must be one of '?', '*', '+'")
+            raise ValueError(
+                "PathMod must be one of '?', '*', '+'"
+            )
         return v
 
     def __hash__(self):
@@ -2064,8 +1605,7 @@ class PathPrimary(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathPrimary
     PathPrimary	  ::=  	iri | 'a' | '!' PathNegatedPropertySet | '(' Path ')'
     """
-
-    value: Union[iri, str, PathNegatedPropertySet, SG_Path]
+    value: Union[IRI, str, PathNegatedPropertySet, SG_Path]
 
     @field_validator("value")
     def validate_function_name(cls, v):
@@ -2079,7 +1619,7 @@ class PathPrimary(SPARQLGrammarBase):
     def render(self):
         if isinstance(self.value, str):
             yield self.value
-        elif isinstance(self.value, iri):
+        elif isinstance(self.value, IRI):
             yield from self.value.render()
         elif isinstance(self.value, PathNegatedPropertySet):
             yield "!"
@@ -2098,7 +1638,6 @@ class PathNegatedPropertySet(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathNegatedPropertySet
     PathNegatedPropertySet	  ::=  	PathOneInPropertySet | '(' ( PathOneInPropertySet ( '|' PathOneInPropertySet )* )? ')'
     """
-
     first_path: PathOneInPropertySet
     other_paths: Optional[List[PathOneInPropertySet]]  # negated paths?
 
@@ -2127,14 +1666,13 @@ class PathOneInPropertySet(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPathOneInPropertySet
     PathOneInPropertySet	  ::=  	iri | 'a' | '^' ( iri | 'a' )
     """
-
-    path: Union[iri, str]
+    path: Union[IRI, str]
     negated: bool = False
 
     def render(self):
         if self.negated:
             yield "^"
-        if isinstance(self.path, iri):
+        if isinstance(self.path, IRI):
             yield from self.path.render()
         elif isinstance(self.path, str):
             yield self.path
@@ -2148,7 +1686,6 @@ class Integer(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rInteger
     Integer	  ::=  	INTEGER
     """
-
     integer: INTEGER
 
     def render(self):
@@ -2160,7 +1697,6 @@ class INTEGER(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rINTEGER
     INTEGER	  ::=  	[0-9]+
     """
-
     integer: str
 
     # TODO validation - use regex or str functions?
@@ -2180,7 +1716,6 @@ class BlankNodePropertyList(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rBlankNodePropertyList
     BlankNodePropertyList	  ::=  	'[' PropertyListNotEmpty ']'
     """
-
     plne: PropertyListNotEmpty
 
     def render(self):
@@ -2194,7 +1729,6 @@ class TriplesNodePath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rTriplesNodePath
     TriplesNodePath	  ::=  	CollectionPath | BlankNodePropertyListPath
     """
-
     coll_path_or_bnpl_path: CollectionPath | BlankNodePropertyListPath
 
     def render(self):
@@ -2267,7 +1801,7 @@ class VarOrTerm(SPARQLGrammarBase):
 
 
 class VarOrIri(SPARQLGrammarBase):
-    varoriri: Var | iri
+    varoriri: Var | IRI
 
     def render(self):
         yield from self.varoriri.render()
@@ -2278,7 +1812,6 @@ class PropertyListNotEmpty(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyListNotEmpty
     PropertyListNotEmpty	  ::=  	Verb ObjectList ( ';' ( Verb ObjectList )? )*
     """
-
     verb_objectlist: List[Tuple[Verb, ObjectList]]
 
     def render(self):
@@ -2309,7 +1842,6 @@ class ObjectList(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rObjectList
     ObjectList	  ::=  	Object ( ',' Object )*
     """
-
     list_object: List[Object]
 
     def render(self):
@@ -2329,7 +1861,6 @@ class Object(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rObject
     Object	  ::=  	GraphNode
     """
-
     graphnode: GraphNode
 
     def render(self):
@@ -2341,11 +1872,7 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rTriplesSameSubjectPath
     TriplesSameSubjectPath	  ::=  	VarOrTerm PropertyListPathNotEmpty | TriplesNodePath PropertyListPath
     """
-
-    content: (
-        Tuple[VarOrTerm, PropertyListPathNotEmpty]
-        | Tuple[TriplesNodePath, PropertyListPath]
-    )
+    content: Tuple[VarOrTerm, PropertyListPathNotEmpty] | Tuple[TriplesNodePath, PropertyListPath]
 
     def render(self):
         yield from self.content[0].render()
@@ -2356,28 +1883,23 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
         return hash(self.content)
 
     @classmethod
-    def from_spo(
-        cls,
-        subject: Var | iri | BlankNode,
-        predicate: Var | iri,
-        object: Var | iri | BlankNode,
-    ):
+    def from_spo(cls, subject: Var | IRI | BlankNode, predicate: Var | IRI, object: Var | IRI | BlankNode):
         """
         Convenience method to create a TriplesSameSubjectPath from a subject, predicate, and object.
-        Currently supports only Var and iri types for subject, predicate, and object.
+        Currently supports only Var and IRI types for subject, predicate, and object.
         """
         # Handle subjects
         if isinstance(subject, Var):
             s_vot = VarOrTerm(varorterm=subject)
-        elif isinstance(subject, (iri, BlankNode)):
+        elif isinstance(subject, (IRI, BlankNode)):
             s_vot = VarOrTerm(varorterm=GraphTerm(content=subject))
         else:
-            raise ValueError("s must be a Var, iri or BlankNode")
+            raise ValueError("s must be a Var, IRI or BlankNode")
 
         # Handle predicates
         if isinstance(predicate, Var):
             verb = VerbSimple(var=predicate)
-        elif isinstance(predicate, iri):
+        elif isinstance(predicate, IRI):
             verb = VerbPath(
                 path=SG_Path(
                     path_alternative=PathAlternative(
@@ -2398,15 +1920,15 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
                 )
             )
         else:
-            raise ValueError("p must be a Var or iri")
+            raise ValueError("p must be a Var or IRI")
 
         # Handle objects
         if isinstance(object, Var):
             o_vot = VarOrTerm(varorterm=object)
-        elif isinstance(object, (iri, BlankNode)):
+        elif isinstance(object, (IRI, BlankNode)):
             o_vot = VarOrTerm(varorterm=GraphTerm(content=object))
         else:
-            raise ValueError("o must be a Var, iri or BlankNode")
+            raise ValueError("o must be a Var, IRI or BlankNode")
 
         return cls(
             content=(
@@ -2424,7 +1946,7 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
                             ]
                         ),
                     )
-                ),
+                )
             )
         )
 
@@ -2434,7 +1956,6 @@ class PropertyListPath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyListPath
     PropertyListPath	  ::=  	PropertyListPathNotEmpty?
     """
-
     plpne: Optional[PropertyListPathNotEmpty] = None
 
     def render(self):
@@ -2447,7 +1968,6 @@ class PropertyListPathNotEmpty(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyListPathNotEmpty
     PropertyListPathNotEmpty	  ::=  	( VerbPath | VerbSimple ) ObjectListPath ( ';' ( ( VerbPath | VerbSimple ) ObjectList )? )*
     """
-
     first_pair: Tuple[VerbPath | VerbSimple, ObjectListPath]
     other_pairs: Optional[List[Tuple[VerbPath | VerbSimple, ObjectList]]] = None
 
@@ -2471,7 +1991,6 @@ class PropertyList(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyList
     PropertyList	  ::=  	PropertyListNotEmpty?
     """
-
     plne: Optional[PropertyListNotEmpty] = None
 
     def render(self):
@@ -2487,7 +2006,6 @@ class ExistsFunc(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rExistsFunc
     ExistsFunc	  ::=  	'EXISTS' GroupGraphPattern
     """
-
     group_graph_pattern: GroupGraphPattern
 
     def render(self):
@@ -2500,7 +2018,6 @@ class NotExistsFunc(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rNotExistsFunc
     NotExistsFunc	  ::=  	'NOT EXISTS' GroupGraphPattern
     """
-
     group_graph_pattern: GroupGraphPattern
 
     def render(self):
