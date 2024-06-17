@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sparql-grammar-pydantic"
-version = "0.1.1"
+version = "0.1.2"
 description = "Pydantic models for the SPARQL Grammar."
 authors = ["david <david@kurrawong.ai>"]
 homepage = "https://github.com/Kurrawong/sparql-grammar-pydantic"
