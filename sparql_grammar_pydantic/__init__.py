@@ -1,13 +1,9 @@
 from .grammar import (
     SPARQLGrammarBase,
-    BlankNodeLabel,
-    Anon,
     Var,
     iri,
     BlankNode,
     RDFLiteral,
-    LANGTAG,
-    NIL,
     NumericLiteral,
     TriplesBlock,
     PrimaryExpression,
@@ -72,7 +68,6 @@ from .grammar import (
     PathNegatedPropertySet,
     PathOneInPropertySet,
     Integer,
-    INTEGER,
     TriplesNode,
     BlankNodePropertyList,
     TriplesNodePath,
@@ -94,17 +89,14 @@ from .grammar import (
     ExistsFunc,
     NotExistsFunc,
 )
+from .terminals import BlankNodeLabel, LANGTAG, INTEGER, NIL, Anon
 
 __all__ = [
     "SPARQLGrammarBase",
-    "BlankNodeLabel",
-    "Anon",
     "Var",
     "iri",
     "BlankNode",
     "RDFLiteral",
-    "LANGTAG",
-    "NIL",
     "NumericLiteral",
     "TriplesBlock",
     "PrimaryExpression",
@@ -169,7 +161,6 @@ __all__ = [
     "PathNegatedPropertySet",
     "PathOneInPropertySet",
     "Integer",
-    "INTEGER",
     "TriplesNode",
     "BlankNodePropertyList",
     "TriplesNodePath",

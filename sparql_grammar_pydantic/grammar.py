@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import logging
-import re
 from enum import Enum
-from typing import List, Optional, Generator, Tuple, Annotated
+from typing import List, Optional, Generator, Tuple
 
-from pydantic import BaseModel, field_validator, model_validator, StringConstraints, ValidationError
-from rdflib import Variable
+from pydantic import (
+    BaseModel,
+    field_validator,
+    model_validator,
+    ValidationError,
+)
+
+from sparql_grammar_pydantic.terminals import IRIREF, PNAME_NS, PNAME_LN, VAR1, VAR2, DECIMAL, DOUBLE, INTEGER_POSITIVE, \
+    DECIMAL_POSITIVE, DOUBLE_POSITIVE, INTEGER_NEGATIVE, DECIMAL_NEGATIVE, DOUBLE_NEGATIVE, STRING_LITERAL1, \
+    STRING_LITERAL2, STRING_LITERAL_LONG1, STRING_LITERAL_LONG2, BlankNodeLabel, LANGTAG, INTEGER, NIL, Anon
 
 log = logging.getLogger(__name__)
 
@@ -518,7 +525,19 @@ class Update1(SPARQLGrammarBase):
     Update1 ::= Load | Clear | Drop | Add | Move | Copy | Create | InsertData | DeleteData | DeleteWhere | Modify
     """
 
-    update1: Load | Clear | Drop | Add | Move | Copy | Create | InsertData | DeleteData | DeleteWhere | Modify
+    update1: (
+        Load
+        | Clear
+        | Drop
+        | Add
+        | Move
+        | Copy
+        | Create
+        | InsertData
+        | DeleteData
+        | DeleteWhere
+        | Modify
+    )
 
     def render(self) -> Generator[str, None, None]:
         yield from self.update1.render()
@@ -696,7 +715,7 @@ class Modify(SPARQLGrammarBase):
 
     with_iri: Optional[iri] = None
     delete_insert_or_insert: (
-            DeleteClause | Tuple[DeleteClause, InsertClause] | InsertClause
+        DeleteClause | Tuple[DeleteClause, InsertClause] | InsertClause
     )
     using_clauses: Optional[List[UsingClause]] = None
     group_graph_pattern: GroupGraphPattern
@@ -990,7 +1009,9 @@ class GraphPatternNotTriples(SPARQLGrammarBase):
     GraphPatternNotTriples	  ::=  	GroupOrUnionGraphPattern | OptionalGraphPattern | MinusGraphPattern | GraphGraphPattern | ServiceGraphPattern | Filter | Bind | InlineData
     """
 
-    content: GroupOrUnionGraphPattern | OptionalGraphPattern | Filter | Bind | InlineData
+    content: (
+        GroupOrUnionGraphPattern | OptionalGraphPattern | Filter | Bind | InlineData
+    )
 
 
 def render(self) -> Generator[str, None, None]:
@@ -1079,6 +1100,7 @@ class DataBlock(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rDataBlock
     DataBlock	  ::=  	InlineDataOneVar | InlineDataFull
     """
+
     block: InlineDataOneVar | InlineDataFull
 
     def render(self) -> Generator[str, None, None]:
@@ -1204,10 +1226,10 @@ class Filter(SPARQLGrammarBase):
 
     @classmethod
     def filter_relational(
-            cls,
-            focus: PrimaryExpression,
-            comparators: PrimaryExpression | List[PrimaryExpression],
-            operator: str,
+        cls,
+        focus: PrimaryExpression,
+        comparators: PrimaryExpression | List[PrimaryExpression],
+        operator: str,
     ) -> Filter:
         """
         Convenience method to create a FILTER clause to compare the focus node to comparators.
@@ -1415,10 +1437,10 @@ class TriplesSameSubject(SPARQLGrammarBase):
 
     @classmethod
     def from_spo(
-            cls,
-            subject: Var | iri | BlankNode,
-            predicate: Var | iri,
-            object: Var | iri | BlankNode,
+        cls,
+        subject: Var | iri | BlankNode,
+        predicate: Var | iri,
+        object: Var | iri | BlankNode,
     ):
         """
         Convenience method to create a TriplesSameSubject from a subject, predicate, and object.
@@ -1559,8 +1581,8 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
     """
 
     content: (
-            Tuple[VarOrTerm, PropertyListPathNotEmpty]
-            | Tuple[TriplesNodePath, PropertyListPath]
+        Tuple[VarOrTerm, PropertyListPathNotEmpty]
+        | Tuple[TriplesNodePath, PropertyListPath]
     )
 
     def render(self):
@@ -1573,10 +1595,10 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
 
     @classmethod
     def from_spo(
-            cls,
-            subject: Var | iri | BlankNode,
-            predicate: Var | iri,
-            object: Var | iri | BlankNode,
+        cls,
+        subject: Var | iri | BlankNode,
+        predicate: Var | iri,
+        object: Var | iri | BlankNode,
     ):
         """
         Convenience method to create a TriplesSameSubjectPath from a subject, predicate, and object.
@@ -2072,10 +2094,17 @@ class Var(SPARQLGrammarBase):
     Var	  ::=  	VAR1 | VAR2
     """
 
-    value: str
+    value: VAR1 | VAR2
 
     def render(self) -> Generator[str, None, None]:
-        yield Variable(self.value).n3()
+        yield from self.value.render()
+
+    @classmethod
+    def from_string(cls, string):
+        try:
+            return cls(value=VAR1(value=string))
+        except ValidationError:
+            raise
 
     def __hash__(self):
         return hash(self.value)
@@ -2108,7 +2137,7 @@ class Expression(SPARQLGrammarBase):
 
     @classmethod
     def from_primary_expression(
-            cls, primary_expression: PrimaryExpression
+        cls, primary_expression: PrimaryExpression
     ) -> Expression:
         """
         Convenience method to create an Expression directly from a Var, wrapped in a PrimaryExpression.
@@ -2139,10 +2168,10 @@ class Expression(SPARQLGrammarBase):
 
     @classmethod
     def create_in_expression(
-            cls,
-            left_primary_expression: PrimaryExpression,
-            operator: str,  # "IN" or "NOT IN"
-            right_primary_expressions: List[PrimaryExpression],
+        cls,
+        left_primary_expression: PrimaryExpression,
+        operator: str,  # "IN" or "NOT IN"
+        right_primary_expressions: List[PrimaryExpression],
     ) -> Expression:
         """ """
         return cls(
@@ -2186,7 +2215,7 @@ class ConditionalOrExpression(SPARQLGrammarBase):
 
     def render(self) -> Generator[str, None, None]:
         for i, conditional_and_expression in enumerate(
-                self.conditional_and_expressions
+            self.conditional_and_expressions
         ):
             yield from conditional_and_expression.render()
             if i < len(self.conditional_and_expressions) - 1:
@@ -2243,6 +2272,7 @@ class MultiplyDivideOperators(Enum):
     MULTIPLY = "*"
     DIVIDE = "/"
 
+
 class AdditiveExpression(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rAdditiveExpression
@@ -2257,15 +2287,14 @@ class AdditiveExpression(SPARQLGrammarBase):
     """
 
     base_expression: MultiplicativeExpression
-    additional_expressions: \
-        Optional[
-            List[
-                Tuple[MultiplacativeOperator, MultiplicativeExpression] | NumericLiteralPositive | NumericLiteralNegative,
-                Optional[
-                    List[
-                        Tuple[MultiplyDivideOperators, UnaryExpression]]]
-            ]
-        ] = []
+    additional_expressions: Optional[
+        List[
+            Tuple[MultiplacativeOperator, MultiplicativeExpression]
+            | NumericLiteralPositive
+            | NumericLiteralNegative,
+            Optional[List[Tuple[MultiplyDivideOperators, UnaryExpression]]],
+        ]
+    ] = []
 
     def render(self) -> Generator[str, None, None]:
         yield from self.base_expression.render()
@@ -2274,7 +2303,9 @@ class AdditiveExpression(SPARQLGrammarBase):
                 yield from operator.render()
             else:
                 yield f" {operator} "
-                yield from expression[0].render()  # MultiplicativeExpression or UnaryExpression
+                yield from expression[
+                    0
+                ].render()  # MultiplicativeExpression or UnaryExpression
                 if expression[1]:  # If there's an additional list of UnaryExpressions
                     for unary_operator, unary_expression in expression[1]:
                         yield f" {unary_operator} "
@@ -2335,13 +2366,13 @@ class PrimaryExpression(SPARQLGrammarBase):
     """
 
     content: (
-            BrackettedExpression
-            | BuiltInCall
-            | iriOrFunction
-            | RDFLiteral
-            | NumericLiteral
-            | BooleanLiteral
-            | Var
+        BrackettedExpression
+        | BuiltInCall
+        | iriOrFunction
+        | RDFLiteral
+        | NumericLiteral
+        | BooleanLiteral
+        | Var
     )
 
     def render(self) -> Generator[str, None, None]:
@@ -2420,14 +2451,14 @@ class BuiltInCall(SPARQLGrammarBase):
     """
 
     function: (
-            BuiltInCallOptions  # most functions under this enum
-            | Aggregate
-            | SubstringExpression
-            | StrReplaceExpression
-            | RegexExpression
-            | ExistsFunc
-            | NotExistsFunc
-            | NotExistsFunc
+        BuiltInCallOptions  # most functions under this enum
+        | Aggregate
+        | SubstringExpression
+        | StrReplaceExpression
+        | RegexExpression
+        | ExistsFunc
+        | NotExistsFunc
+        | NotExistsFunc
     )
     arguments: Optional[
         Expression
@@ -2457,7 +2488,7 @@ class BuiltInCall(SPARQLGrammarBase):
 
     @classmethod
     def create_with_one_expr(
-            cls, function_name: str, expression: PrimaryExpression
+        cls, function_name: str, expression: PrimaryExpression
     ) -> BuiltInCall:
         """
         Convenience method for functions that take a single PrimaryExpression as an argument.
@@ -2467,7 +2498,7 @@ class BuiltInCall(SPARQLGrammarBase):
 
     @classmethod
     def create_with_n_expr(
-            cls, function_name: str, expressions: List[PrimaryExpression]
+        cls, function_name: str, expressions: List[PrimaryExpression]
     ) -> BuiltInCall:
         """
         Convenience method for functions that take a list of PrimaryExpressions as arguments.
@@ -2648,17 +2679,30 @@ class RDFLiteral(SPARQLGrammarBase):
     RDFLiteral	  ::=  	String ( LANGTAG | ( '^^' iri ) )?
     """
 
-    value: str
+    value: String
     langtag: Optional[LANGTAG] = None
     datatype: Optional[iri] = None
 
     def render(self) -> Generator[str, None, None]:
-        yield f'"{self.value}"'
+        yield from self.value.render()
         if self.langtag:
             yield from self.langtag.render()
         elif self.datatype:
             yield "^^"
             yield from self.datatype.render()
+
+    @classmethod
+    def from_string(cls, string):
+        try:
+            return cls(
+                value=String(
+                    value=STRING_LITERAL2(
+                        value=string
+                    )
+                )
+            )
+        except ValidationError:
+            raise
 
     def __hash__(self):
         return hash(self.value)
@@ -2774,7 +2818,9 @@ class iri(SPARQLGrammarBase):
             try:
                 return cls(value=PrefixedName(value=string))
             except ValidationError as ve2:
-                raise ValueError(f"Invalid IRI: {string}. Failed validations: {ve1, ve2}")
+                raise ValueError(
+                    f"Invalid IRI: {string}. Failed validations: {ve1, ve2}"
+                )
 
     def __hash__(self):
         return hash(self.value)
@@ -2810,576 +2856,3 @@ class BlankNode(SPARQLGrammarBase):
         return hash(self.value)
 
 
-###########################
-# Productions for terminals
-###########################
-
-
-IRIREF_REGEX = r'([^<>"{}|^`\\u0000-\\u0020])*'  # IRIREF
-PN_CHARS_BASE_REGEX = (
-    r"[A-Z]|[a-z]|"
-    r"[\u00C0-\u00D6]|"
-    r"[\u00D8-\u00F6]|"
-    r"[\u00F8-\u02FF]|"
-    r"[\u0370-\u037D]|"
-    r"[\u037F-\u1FFF]|"
-    r"[\u200C-\u200D]|"
-    r"[\u2070-\u218F]|"
-    r"[\u2C00-\u2FEF]|"
-    r"[\u3001-\uD7FF]|"
-    r"[\uF900-\uFDCF]|"
-    r"[\uFDF0-\uFFFD]|"
-    r"[\U00010000-\U000EFFFF]"
-)
-INT = r"[0-9]"  # INTEGER
-PN_CHARS_U_REGEX = rf"({PN_CHARS_BASE_REGEX}|_)"  # PN_CHARS_U
-PN_CHARS_REGEX = rf"({PN_CHARS_U_REGEX}|-|{INT}|[\u00B7]|[\u0300-\u036F]|[\u203F-\u2040])"  # PN_CHARS
-PN_PREFIX_REGEX = (
-    rf"{PN_CHARS_BASE_REGEX}(({PN_CHARS_REGEX}|\.)*{PN_CHARS_REGEX})?"  # PN_PREFIX
-)
-PNAME_NS_REGEX = rf"({PN_PREFIX_REGEX})?"  # PNAME_NS
-# VARNAME_REGEX = rf"(({PN_CHARS_U_REGEX}|{INT})({PN_CHARS_REGEX}|{INT}|[\u00B7]|[\u0300-\u036F]|[\u203F-\u2040])*)"  # VARNAME
-VARNAME_REGEX = rf"({PN_CHARS_U_REGEX}|{INT})({PN_CHARS_U_REGEX}|{INT}|[\u00B7]|[\u0300-\u036F]|[\u203F-\u2040])*"
-BLANK_NODE_LABEL_REGEX = rf"(({PN_CHARS_U_REGEX}|{INT})(({PN_CHARS_REGEX}|\.)*{PN_CHARS_REGEX})?)"  # BLANK_NODE_LABEL
-LANGTAG_REGEX = r"@[a-zA-Z]+(-[a-zA-Z0-9]+)*"  # LANGTAG
-INTEGER_REGEX = rf"{INT}+"  # INTEGER
-DECIMAL_REGEX = rf"{INT}*\.{INT}+"  # DECIMAL
-EXPONENT_REGEX = rf"[eE][+-]?{INT}+"  # EXPONENT
-DOUBLE_REGEX = rf"{INT}+\.{INT}*{EXPONENT_REGEX}|\.{INT}+{EXPONENT_REGEX}|{INT}+{EXPONENT_REGEX}"  # DOUBLE
-ECHAR_REGEX = r"\\[tbnrf\"\'\\]"  # ECHAR
-STRING_LITERAL1_REGEX = rf"([^\\u0027\\u005C\\u000A\\u000D]|{ECHAR_REGEX})*"  # STRING_LITERAL1
-STRING_LITERAL2_REGEX = rf"([^\\u0022\\u005C\\u000A\\u000D]|{ECHAR_REGEX})*"  # STRING_LITERAL2
-STRING_LITERAL_LONG1_REGEX = rf"'''((''|')?([^'\\]|{ECHAR_REGEX}))*'''"  # STRING_LITERAL_LONG1
-STRING_LITERAL_LONG2_REGEX = rf'"""(("|"")?([^"\\]|{ECHAR_REGEX}))*"""'  # STRING_LITERAL_LONG2
-WS_REGEX = r"[\u0020\u0009\u000D\u000A]"  # WS
-NIL_ANON_REGEX = rf"{WS_REGEX}*"  # NIL
-HEX_REGEX = r"[0-9A-Fa-f]"  # HEX
-PERCENT_REGEX = rf"%{HEX_REGEX}{HEX_REGEX}"  # PERCENT
-PN_LOCAL_ESC_REGEX = r"[_~.\-!$&\'()*+,;=\/?@%]"  # PN_LOCAL_ESC
-PLX_REGEX = rf"{PERCENT_REGEX}|{PN_LOCAL_ESC_REGEX}"  # PLX
-PN_LOCAL_REGEX = rf"({PN_CHARS_U_REGEX}|:|{INT}|{PLX_REGEX})(({PN_CHARS_REGEX}|.|:|{PLX_REGEX})*({PN_CHARS_REGEX}|:|{PLX_REGEX}))?"  # PN_LOCAL
-PNAME_LN_REGEX = f"{PNAME_NS_REGEX}{PN_LOCAL_REGEX}"  # PNAME_LN
-
-
-class IRIREF(BaseModel):
-    """
-    https://www.w3.org/TR/sparql11-query/#rIRIREF
-    IRIREF ::= '<' ([^<>"{}|^`\x00-\x20])* '>'
-    """
-
-    # value: Annotated[str, StringConstraints(pattern=r'([^<>"{}|^`\x00-\x20])*')]
-    # value: Annotated[str, StringConstraints(pattern=IRIREF_REGEX)]
-    value: str
-
-    @field_validator('value')
-    @classmethod
-    def check_value(cls, v):
-        match = re.fullmatch(IRIREF_REGEX, v)
-        if not match:
-            raise ValueError(f"Invalid IRIREF value: {v}")
-        return v
-
-    def render(self) -> Generator[str, None, None]:
-        yield "<"
-        yield self.value
-        yield ">"
-
-
-class PNAME_NS(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPNAME_NS
-    PNAME_NS ::= PN_PREFIX? ':'
-    """
-
-    value: Optional[Annotated[str, StringConstraints(pattern=PN_PREFIX_REGEX)]] = None
-
-    def render(self) -> Generator[str, None, None]:
-        if self.value:
-            yield self.value
-        yield ":"
-
-
-class PNAME_LN(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPNAME_LN
-    PNAME_LN ::= PNAME_NS PN_LOCAL
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PNAME_LN_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class BlankNodeLabel(SPARQLGrammarBase):
-    """
-    BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
-    """
-
-    # part_1: str
-    # part_2: Optional[str] = None
-    value: Annotated[str, StringConstraints(pattern=BLANK_NODE_LABEL_REGEX)]
-
-    def render(self):
-        yield "_:"
-        yield self.value
-
-
-class VAR1(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rVAR1
-    VAR1	  ::=  	'?' VARNAME
-    """
-
-    # varname: VARNAME
-    value: Annotated[str, StringConstraints(pattern=VARNAME_REGEX)]
-
-    def render(self):
-        yield "?"
-        yield self.value
-
-
-class VAR2(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rVAR2
-    VAR2	  ::=  	'$' VARNAME
-    """
-
-    # varname: VARNAME
-    value: Annotated[str, StringConstraints(pattern=VARNAME_REGEX)]
-
-    def render(self):
-        yield "$"
-        yield self.value
-
-
-class LANGTAG(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rLANGTAG
-    LANGTAG	  ::=  	'@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
-    """
-
-    # tags: List[Annotated[str, StringConstraints(pattern=r"[a-zA-Z]+")]]
-    # subtags: Optional[
-    #     List[Annotated[str, StringConstraints(pattern=r"[a-zA-Z0-9]+")]]
-    # ] = None
-    value: Annotated[str, StringConstraints(pattern=LANGTAG_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "@"
-        yield self.value
-        # for tag in self.tags:
-        #     yield tag
-        # if self.subtags:
-        #     for subtag in self.subtags:
-        #         yield "-"
-        #         yield subtag
-
-
-class INTEGER(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rINTEGER
-    INTEGER	  ::=  	[0-9]+
-    """
-
-    value: Annotated[str, StringConstraints(pattern=INTEGER_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class DECIMAL(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDECIMAL
-    DECIMAL	  ::=  	[0-9]* '.' [0-9]+
-    """
-
-    # value: Annotated[str, StringConstraints(pattern=r"[0-9]*\.[0-9]+")]
-    value: Annotated[str, StringConstraints(pattern=DECIMAL_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class DOUBLE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDOUBLE
-    DOUBLE	  ::=  	[0-9]+ '.' [0-9]* EXPONENT | '.' ([0-9])+ EXPONENT | ([0-9])+ EXPONENT
-    """
-
-    # base: Annotated[
-    #     str, StringConstraints(pattern=r"([0-9]+\.?[0-9]*|\.[0-9]+|[0-9]+)")
-    # ]
-    # exponent: EXPONENT
-    value: Annotated[str, StringConstraints(pattern=DOUBLE_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        # yield self.base
-        # yield from self.exponent.render()
-        yield self.value
-
-
-class INTEGER_POSITIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rINTEGER_POSITIVE
-    INTEGER_POSITIVE ::= '+' INTEGER
-    """
-
-    value: Annotated[str, StringConstraints(pattern=INTEGER_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "+"
-        yield self.value
-
-
-class DECIMAL_POSITIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDECIMAL_POSITIVE
-    DECIMAL_POSITIVE ::= '+' DECIMAL
-    """
-
-    value: Annotated[str, StringConstraints(pattern=DECIMAL_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "+"
-        yield self.value
-
-
-class DOUBLE_POSITIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDOUBLE_POSITIVE
-    DOUBLE_POSITIVE ::= '+' DOUBLE
-    """
-
-    value: Annotated[str, StringConstraints(pattern=DOUBLE_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "+"
-        yield self.value
-
-
-class INTEGER_NEGATIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rINTEGER_NEGATIVE
-    INTEGER_NEGATIVE ::= '-' INTEGER
-    """
-
-    value: Annotated[str, StringConstraints(pattern=INTEGER_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "-"
-        yield self.value
-
-
-class DECIMAL_NEGATIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDECIMAL_NEGATIVE
-    DECIMAL_NEGATIVE ::= '-' DECIMAL
-    """
-
-    value: Annotated[str, StringConstraints(pattern=DECIMAL_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "-"
-        yield self.value
-
-
-class DOUBLE_NEGATIVE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rDOUBLE_NEGATIVE
-    DOUBLE_NEGATIVE ::= '-' DOUBLE
-    """
-
-    value: Annotated[str, StringConstraints(pattern=DOUBLE_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "-"
-        yield self.value
-
-
-class EXPONENT(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rEXPONENT
-    EXPONENT	  ::=  	[eE] [+-]? [0-9]+
-    """
-
-    value: Annotated[str, StringConstraints(pattern=EXPONENT_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class STRING_LITERAL1(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSTRING_LITERAL1
-    STRING_LITERAL1	  ::=  	"'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
-    """
-
-    value: Annotated[str, StringConstraints(pattern=STRING_LITERAL1_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "'"
-        yield self.value
-        yield "'"
-
-
-class STRING_LITERAL2(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSTRING_LITERAL2
-    STRING_LITERAL2	  ::=  	'"' ( ([^#x22#x5C#xA#xD]) | ECHAR )* '"'
-    """
-
-    value: Annotated[str, StringConstraints(pattern=STRING_LITERAL2_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield '"'
-        yield self.value
-        yield '"'
-
-
-class STRING_LITERAL_LONG1(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSTRING_LITERAL_LONG1
-    STRING_LITERAL_LONG1	  ::=  	"'''" ( ( "'" | "''" )? ( [^'\] | ECHAR ) )* "'''"
-    """
-
-    value: Annotated[str, StringConstraints(pattern=STRING_LITERAL_LONG1_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "'''"
-        yield self.value
-        yield "'''"
-
-
-class STRING_LITERAL_LONG2(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rSTRING_LITERAL_LONG2
-    STRING_LITERAL_LONG2	  ::=  	'\"""' ( ( '"' | '""' )? ( [^"\] | ECHAR ) )* '\"""'
-    """
-
-    value: Annotated[str, StringConstraints(pattern=STRING_LITERAL_LONG2_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield '"""'
-        yield self.value
-        yield '"""'
-
-
-class ECHAR(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rECHAR
-    ECHAR	  ::=  	'\' [tbnrf\"']
-    """
-
-    value: Annotated[str, StringConstraints(pattern=ECHAR_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class NIL(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rNIL
-    NIL	  ::=  	'(' WS* ')'
-    """
-
-    value: Annotated[str, StringConstraints(pattern=NIL_ANON_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield "("
-        yield self.value
-        yield ")"
-
-
-class WS(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rWS
-    WS	  ::=  	#x20 | #x9 | #xD | #xA
-    """
-
-    value: Annotated[str, StringConstraints(pattern=WS_REGEX)]
-
-    def render(self) -> Generator[str, None, None]:
-        yield self.value
-
-
-class Anon:
-    """
-    ANON	  ::=  	'[' WS* ']'
-    https://www.w3.org/TR/sparql11-query/#rANON
-    """
-
-    value: Annotated[str, StringConstraints(pattern=NIL_ANON_REGEX)]
-
-    def render(self):
-        yield "["
-        yield self.value
-        yield "]"
-
-
-class PN_CHARS_BASE(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_CHARS_BASE
-    PN_CHARS_BASE	  ::=  	[A-Z] | [a-z] | [#x00C0-#x00D6] | [#x00D8-#x00F6] | [#x00F8-#x02FF] | [#x0370-#x037D] | [#x037F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PN_CHARS_BASE_REGEX)]
-
-    def render(self):
-        yield self.value
-
-
-class PN_CHARS_U(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_CHARS_U
-    PN_CHARS_U	  ::=  	PN_CHARS_BASE | '_'
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PN_CHARS_U_REGEX)]
-
-    def render(self):
-        yield self.value
-
-
-class VARNAME(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rVARNAME
-    VARNAME	  ::=  	( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040] )*
-    """
-
-    # part_1: PN_CHARS_U | Annotated[str, StringConstraints(pattern=r"[0-9]")]
-    # part_2: List[PN_CHARS_U | Annotated[str, StringConstraints(pattern=r"[0-9\x00B7\x0300-\x036F\x203F-\x2040]")]]
-    value: Annotated[str, StringConstraints(pattern=VARNAME_REGEX)]
-
-    def render(self):
-        yield self.value
-        # if isinstance(self.part_1, PN_CHARS_U):
-        #     yield from self.part_1.render()
-        # else:
-        #     yield self.part_1.value
-        # for part in self.part_2:
-        #     if isinstance(part, PN_CHARS_U):
-        #         yield from part.render()
-        #     else:
-        #         yield part.value
-
-
-class PN_CHARS(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_CHARS
-    PN_CHARS	  ::=  	PN_CHARS_U | '-' | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040]
-    """
-
-    # value: PN_CHARS_U | Annotated[str, StringConstraints(pattern=r"[-0-9\x00B7\x0300-\x036F\x203F-\x2040]")]
-    value: Annotated[str, StringConstraints(pattern=PN_CHARS_REGEX)]
-
-    def render(self):
-        # if isinstance(self.value, PN_CHARS_U):
-        #     yield from self.value.render()
-        # else:
-        #     yield self.value
-        yield self.value
-
-
-class PN_PREFIX(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_PREFIX
-    PN_PREFIX	  ::=  	PN_CHARS_BASE ((PN_CHARS|'.')* PN_CHARS)?
-    """
-
-    # part_1: PN_CHARS_BASE
-    # part_2: Optional[Tuple[List[PN_CHARS | Annotated[str, StringConstraints(pattern=r"\.")]]], PN_CHARS]
-    value: Annotated[str, StringConstraints(pattern=PN_PREFIX_REGEX)]
-
-    def render(self):
-        # yield from self.part_1.render()
-        # if self.part_2:
-        #     parts_list, pn_chars = self.part_2
-        #     for part in parts_list:
-        #         if isinstance(part, PN_CHARS):
-        #             yield from part.render()
-        #         else:
-        #             yield part.value
-        #     yield from pn_chars.render()
-        yield self.value
-
-
-class PN_LOCAL(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_LOCAL
-    PN_LOCAL	  ::=  	(PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS|'.'|':'|PLX)* (PN_CHARS|':'|PLX))?
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PN_LOCAL_REGEX)]
-
-    # part_1: PN_CHARS_U | Annotated[str, StringConstraints(pattern=r":[0-9]")] | PLX
-    # part_2: Optional[
-    #     Tuple[
-    #         List[PN_CHARS | Annotated[str, StringConstraints(pattern=r"\.:")]],
-    #         PN_CHARS | Annotated[str, StringConstraints(pattern=r"\.:")],
-    #     ]
-    # ]
-
-    def render(self):
-        yield self.value
-        # if isinstance(self.part_1, PN_CHARS_U):
-        #     yield from self.part_1.render()
-        # else:
-        #     yield self.part_1.value
-        # if self.part_2:
-        #     parts_list, pn_chars = self.part_2
-        #     for part in parts_list:
-        #         if isinstance(part, PN_CHARS):
-        #             yield from part.render()
-        #         else:
-        #             yield part.value
-        #     yield from pn_chars.render()
-
-
-class PLX(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPLX
-    PLX	  ::=  	PERCENT | PN_LOCAL_ESC
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PLX_REGEX)]
-
-    def render(self):
-        yield self.value
-
-
-class PERCENT(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPERCENT
-    PERCENT	  ::=  	'%' HEX HEX
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PERCENT_REGEX)]
-
-    def render(self):
-        yield self.value
-
-
-class HEX(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rHEX
-    HEX	  ::=  	[0-9] | [A-F] | [a-f]
-    """
-
-    value: Annotated[str, StringConstraints(pattern=HEX_REGEX)]
-
-    def render(self):
-        yield self.value
-
-
-class PN_LOCAL_ESC(SPARQLGrammarBase):
-    """
-    https://www.w3.org/TR/sparql11-query/#rPN_LOCAL_ESC
-    PN_LOCAL_ESC	  ::=  	'\' ( '_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%' )
-    """
-
-    value: Annotated[str, StringConstraints(pattern=PN_LOCAL_ESC_REGEX)]
-
-    def render(self):
-        yield "\\"
-        yield self.value

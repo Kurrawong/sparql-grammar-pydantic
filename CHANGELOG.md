@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Any security fixes
 
+## [0.1.2] - 2024-06-17
+
+### Fixed
+- iri -> IRI
+
+## [0.1.1] - 2024-06-17
+
+### Added
+- Add further allowed arguments to BuiltInCall.
+
 ## [0.1.0] - 2024-06-07
 
 ### Added
