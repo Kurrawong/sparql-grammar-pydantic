@@ -931,19 +931,21 @@ class OffsetClause(SPARQLGrammarBase):
 
 class OrderCondition(SPARQLGrammarBase):
     """
+    https://www.w3.org/TR/sparql11-query/#rOrderCondition
+    OrderCondition	  ::=  	( ( 'ASC' | 'DESC' ) BrackettedExpression ) | ( Constraint | Var )
     Default direction is ASC if not specified
     """
 
-    var: Var
+    constraint_or_var: Constraint | Var
     direction: Optional[str] = None
 
     def render(self):
         if self.direction:
             yield f"{self.direction}("
-            yield from self.var.render()
+            yield from self.constraint_or_var.render()
             yield ")"
         else:
-            yield from self.var.render()
+            yield from self.constraint_or_var.render()
 
 
 class OrderClause(SPARQLGrammarBase):
