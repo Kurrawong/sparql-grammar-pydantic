@@ -985,7 +985,7 @@ class SolutionModifier(SPARQLGrammarBase):
 
     order_by: OrderClause | None = None
     limit_offset: LimitOffsetClauses | None = None
-    having: HavingClause | None
+    having: HavingClause | None = None
     group_by: GroupClause | None = None
 
     def render(self):
