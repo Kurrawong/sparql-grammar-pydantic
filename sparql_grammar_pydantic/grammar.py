@@ -952,7 +952,7 @@ class OrderClause(SPARQLGrammarBase):
     conditions: List[OrderCondition]
 
     def render(self):
-        yield "\nORDER BY "
+        yield "ORDER BY "
         yield " ".join(
             part for condition in self.conditions for part in condition.render()
         )
@@ -971,9 +971,9 @@ class LimitOffsetClauses(SPARQLGrammarBase):
     def render(self) -> Generator[str, None, None]:
         if self.limit_clause:
             yield from self.limit_clause.render()
+            if self.offset_clause:
+                yield " "
         if self.offset_clause:
-            if self.limit_clause:
-                yield "\n"
             yield from self.offset_clause.render()
 
 
@@ -985,18 +985,46 @@ class SolutionModifier(SPARQLGrammarBase):
 
     order_by: OrderClause | None = None
     limit_offset: LimitOffsetClauses | None = None
-    # having: HavingClause | None
+    having: HavingClause | None
     group_by: GroupClause | None = None
 
-    def render(self) -> str:
+    def render(self):
         if self.order_by:
             yield from self.order_by.render()
+            yield "\n"
         if self.limit_offset:
-            if self.order_by:
-                yield "\n"
             yield from self.limit_offset.render()
+            yield "\n"
         if self.group_by:
             yield from self.group_by.render()
+            yield "\n"
+        if self.having:
+            yield from self.having.render()
+            yield "\n"
+
+
+class HavingClause(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rHavingClause
+    HavingClause	  ::=  	'HAVING' HavingCondition+
+    """
+    conditions: List[HavingCondition]
+
+    def render(self):
+        yield "HAVING "
+        for hc in self.conditions:
+            yield from hc.render()
+
+
+class HavingCondition(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rHavingCondition
+    HavingCondition	  ::=  	Constraint
+    """
+    constraint: Constraint
+
+    def render(self):
+        yield from self.constraint.render()
 
 
 class GroupClause(SPARQLGrammarBase):
@@ -1005,10 +1033,10 @@ class GroupClause(SPARQLGrammarBase):
     GroupClause ::= 'GROUP' 'BY' GroupCondition+
     """
 
-    group_conditions: List["GroupCondition"]
+    group_conditions: List[GroupCondition]
 
     def render(self) -> Generator[str, None, None]:
-        yield "\nGROUP BY "
+        yield "GROUP BY "
         for i, condition in enumerate(self.group_conditions):
             yield from condition.render()
             if i < len(self.group_conditions) - 1:  # Check if it's not the last triple
