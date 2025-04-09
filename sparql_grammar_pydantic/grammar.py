@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import List, Union, Optional, Generator, Tuple
+from typing import List, Union, Generator, Tuple
 
 from pydantic import BaseModel, field_validator
 from rdflib import URIRef, Variable
@@ -66,7 +66,7 @@ class BlankNodeLabel(SPARQLGrammarBase):
     """
 
     part_1: str
-    part_2: Optional[str] = None
+    part_2: str | None = None
 
     def render(self):
         yield "_:"
@@ -141,8 +141,8 @@ class RDFLiteral(SPARQLGrammarBase):
     """
 
     value: str
-    langtag: Optional[LANGTAG] = None
-    datatype: Optional[IRI] = None
+    langtag: LANGTAG | None = None
+    datatype: IRI | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield f'"{self.value}"'
@@ -162,7 +162,7 @@ class LANGTAG(SPARQLGrammarBase):
     """
 
     tag: str
-    subtag: Optional[str] = None
+    subtag: str | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield f"@{self.tag}"
@@ -220,7 +220,7 @@ class TriplesBlock(SPARQLGrammarBase):
     TriplesBlock	  ::=  	TriplesSameSubjectPath ( '.' TriplesBlock? )?
     """
     triples: TriplesSameSubjectPath = None
-    triples_block: Optional[TriplesBlock] = None
+    triples_block: TriplesBlock | None = None
 
     def render(self) -> Generator[str, None, None]:
         if isinstance(self.triples, list):
@@ -237,7 +237,7 @@ class TriplesBlock(SPARQLGrammarBase):
 
     # TODO check if subject is same, if so, absorb into existing triples same subject path
     @classmethod
-    def from_tssp_list(cls, tssp_list: Optional[List[TriplesSameSubjectPath]]):
+    def from_tssp_list(cls, tssp_list: List[TriplesSameSubjectPath] | None):
         if tssp_list:
             tssp_iter = iter(tssp_list)
             first_tssp = next(tssp_iter)
@@ -267,7 +267,7 @@ class PrimaryExpression(SPARQLGrammarBase):
 
 
 class UnaryExpression(SPARQLGrammarBase):
-    operator: Optional[str] = None  # '!', '+', or '-'
+    operator: str | None = None  # '!', '+', or '-'
     primary_expression: PrimaryExpression
 
     def render(self) -> Generator[str, None, None]:
@@ -278,7 +278,7 @@ class UnaryExpression(SPARQLGrammarBase):
 
 class MultiplicativeExpression(SPARQLGrammarBase):
     base_expression: UnaryExpression
-    additional_expressions: Optional[List[Tuple[str, UnaryExpression]]] = []
+    additional_expressions: List[Tuple[str, UnaryExpression]] | None = []
 
     @field_validator("additional_expressions")
     def validate_additional_expressions(cls, v):
@@ -301,9 +301,9 @@ class AdditiveExpression(SPARQLGrammarBase):
     """
 
     base_expression: "MultiplicativeExpression"
-    additional_expressions: Optional[
-        List[Tuple[str, Union[MultiplicativeExpression, UnaryExpression]]]
-    ] = []
+    additional_expressions: List[
+        Tuple[str, Union[MultiplicativeExpression, UnaryExpression]]
+    ] | None = []
 
     @field_validator("additional_expressions")
     def validate_additional_expressions(cls, v):
@@ -332,8 +332,8 @@ class RelationalExpression(SPARQLGrammarBase):
     """
 
     left: NumericExpression
-    operator: Optional[str] = None  # '=', '!=', '<', '>', '<=', '>=', 'IN' and 'NOT IN'
-    right: Optional[Union[NumericExpression, ExpressionList]] = None
+    operator: str | None = None  # '=', '!=', '<', '>', '<=', '>=', 'IN' and 'NOT IN'
+    right: Union[NumericExpression, ExpressionList] | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield from self.left.render()
@@ -568,7 +568,7 @@ class ValuesClause(SPARQLGrammarBase):
     ValuesClause	  ::=  	( 'VALUES' DataBlock )?
     """
 
-    data_block: Optional[DataBlock]
+    data_block: DataBlock | None
 
     def render(self) -> Generator[str, None, None]:
         if self.data_block:
@@ -599,10 +599,10 @@ class GroupGraphPatternSub(SPARQLGrammarBase):
     GroupGraphPatternSub	  ::=  	TriplesBlock? ( GraphPatternNotTriples '.'? TriplesBlock? )*
     """
 
-    triples_block: Optional[TriplesBlock] = None
-    graph_patterns_or_triples_blocks: Optional[
-        List[Union[GraphPatternNotTriples, TriplesBlock]]
-    ] = None
+    triples_block: TriplesBlock | None = None
+    graph_patterns_or_triples_blocks: List[
+        Union[GraphPatternNotTriples, TriplesBlock]
+    ] | None = None
 
     def render(self) -> Generator[str, None, None]:
         if self.triples_block:
@@ -639,7 +639,7 @@ class GroupGraphPatternSub(SPARQLGrammarBase):
 #     """
 #     GroupGraphPatternSub ::= TriplesBlock? (GraphPatternNotTriples '.'? TriplesBlock?)*
 #     """
-#     patterns: Optional[List[Union[TriplesBlock, GraphPatternNotTriples]]] = None
+#     patterns: List[Union[TriplesBlock, GraphPatternNotTriples]] | None = None
 #
 #     def render(self) -> Generator[str, None, None]:
 #         for pattern in self.patterns:
@@ -662,8 +662,8 @@ class SelectClause(SPARQLGrammarBase):
     SelectClause	  ::=  	'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( ( Var | ( '(' Expression 'AS' Var ')' ) )+ | '*' )
     """
 
-    distinct: Optional[bool] = None
-    reduced: Optional[bool] = None
+    distinct: bool | None = None
+    reduced: bool | None = None
     variables_or_all: Union[List[Union[Var, Tuple[Expression, Var]]], str]
 
     def render(self):
@@ -696,8 +696,8 @@ class SubSelect(SPARQLGrammarBase):
 
     select_clause: SelectClause
     where_clause: WhereClause
-    solution_modifier: Optional[SolutionModifier] = None
-    values_clause: Optional[ValuesClause] = None
+    solution_modifier: SolutionModifier | None = None
+    values_clause: ValuesClause | None = None
 
     def render(self):
         yield from self.select_clause.render()
@@ -713,9 +713,9 @@ class SubSelectString(SubSelect):
     as text, such as via sh:target / sh:select. NB by providing a subquery this way, the query cannot be validated. Use
     of translateAlgebra will to some extent "validate" the query though, and will expand any prefixes known to RDFLib."""
 
-    select_clause: Optional[str] = None
-    where_clause: Optional[str] = None
-    solution_modifier: Optional[SolutionModifier] = None
+    select_clause: str | None = None
+    where_clause: str | None = None
+    solution_modifier: SolutionModifier | None = None
     select_string: str
 
     @field_validator("select_string")
@@ -848,7 +848,7 @@ class ArgList(SPARQLGrammarBase):
     ArgList ::= NIL | '(' 'DISTINCT'? Expression ( ',' Expression )* ')'
     """
 
-    expressions: Optional[Union[NIL, List[Expression]]]
+    expressions: Union[NIL, List[Expression]] | None
     distinct: bool = False
 
     def render(self) -> Generator[str, None, None]:
@@ -937,7 +937,7 @@ class OrderCondition(SPARQLGrammarBase):
     """
 
     constraint_or_var: Constraint | Var
-    direction: Optional[str] = None
+    direction: str | None = None
 
     def render(self):
         if self.direction:
@@ -965,8 +965,8 @@ class LimitOffsetClauses(SPARQLGrammarBase):
     LimitOffsetClauses ::= LimitClause OffsetClause? | OffsetClause LimitClause?
     """
 
-    limit_clause: Optional[LimitClause] = None
-    offset_clause: Optional[OffsetClause] = None
+    limit_clause: LimitClause | None = None
+    offset_clause: OffsetClause | None = None
 
     def render(self) -> Generator[str, None, None]:
         if self.limit_clause:
@@ -983,10 +983,10 @@ class SolutionModifier(SPARQLGrammarBase):
     SolutionModifier	  ::=  	GroupClause? HavingClause? OrderClause? LimitOffsetClauses?
     """
 
-    order_by: Optional[OrderClause] = None
-    limit_offset: Optional[LimitOffsetClauses] = None
-    # having: Optional[HavingClause]
-    group_by: Optional[GroupClause] = None
+    order_by: OrderClause | None = None
+    limit_offset: LimitOffsetClauses | None = None
+    # having: HavingClause | None
+    group_by: GroupClause | None = None
 
     def render(self) -> str:
         if self.order_by:
@@ -1107,7 +1107,7 @@ class ConstructTriples(SPARQLGrammarBase):
     """
 
     triples: TriplesSameSubject
-    construct_triples: Optional[ConstructTriples] = None
+    construct_triples: ConstructTriples | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield from self.triples.render()
@@ -1164,7 +1164,7 @@ class ConstructTemplate(SPARQLGrammarBase):
     ConstructTemplate	  ::=  	'{' ConstructTriples? '}'
     """
 
-    construct_triples: Optional[ConstructTriples] = None
+    construct_triples: ConstructTriples | None = None
 
     def render(self) -> Generator[str, None, None]:
         if self.construct_triples:
@@ -1213,11 +1213,11 @@ class BuiltInCall(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rBuiltInCall
     """
 
-    other_expressions: Optional[Union[Aggregate, RegexExpression, ExistsFunc, NotExistsFunc]] = None
-    function_name: Optional[str] = None
-    arguments: Optional[
-        List[Union[Expression, Tuple[Expression], ExpressionList, Var, NIL]]
-    ] = None
+    other_expressions: Union[Aggregate, RegexExpression, ExistsFunc, NotExistsFunc] | None = None
+    function_name: str | None = None
+    arguments: List[
+        Union[Expression, Tuple[Expression], ExpressionList, Var, NIL]
+    ] | None = None
 
     @field_validator("function_name")
     def validate_function_name(cls, v):
@@ -1304,7 +1304,7 @@ class IRIOrFunction(SPARQLGrammarBase):
     """
 
     iri: IRI
-    arg_list: Optional[ArgList] = None
+    arg_list: ArgList | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield from self.iri.render()
@@ -1315,7 +1315,7 @@ class IRIOrFunction(SPARQLGrammarBase):
 
 
 class ExpressionList(SPARQLGrammarBase):
-    expressions: Optional[List[Expression]] = []
+    expressions: List[Expression] | None = []
 
     def render(self) -> Generator[str, None, None]:
         if not self.expressions:
@@ -1342,11 +1342,9 @@ class Aggregate(SPARQLGrammarBase):
     """
 
     function_name: str  # One of 'COUNT', 'SUM', 'MIN', 'MAX', 'AVG', 'SAMPLE', 'GROUP_CONCAT'
-    distinct: Optional[bool] = None
-    expression: Optional[
-        Union[str, Expression]
-    ] = None  # '*' for COUNT, else Expression
-    separator: Optional[str] = None  # Only used for GROUP_CONCAT
+    distinct: bool | None = None
+    expression: Union[str, Expression] | None = None  # '*' for COUNT, else Expression
+    separator: str | None = None  # Only used for GROUP_CONCAT
 
     @field_validator("function_name")
     def validate_function_name(cls, v):
@@ -1390,7 +1388,7 @@ class RegexExpression(SPARQLGrammarBase):
 
     text_expression: Expression
     pattern_expression: Expression
-    flags_expression: Optional[Expression] = None
+    flags_expression: Expression | None = None
 
     def render(self) -> Generator[str, None, None]:
         yield "REGEX("
@@ -1551,7 +1549,7 @@ class PathElt(SPARQLGrammarBase):
     PathElt	  ::=  	PathPrimary PathMod?
     """
     path_primary: PathPrimary
-    path_mod: Optional[PathMod] = None
+    path_mod: PathMod | None = None
 
     def render(self):
         yield from self.path_primary.render()
@@ -1641,7 +1639,7 @@ class PathNegatedPropertySet(SPARQLGrammarBase):
     PathNegatedPropertySet	  ::=  	PathOneInPropertySet | '(' ( PathOneInPropertySet ( '|' PathOneInPropertySet )* )? ')'
     """
     first_path: PathOneInPropertySet
-    other_paths: Optional[List[PathOneInPropertySet]]  # negated paths?
+    other_paths: List[PathOneInPropertySet] | None  # negated paths?
 
     def render(self):
         yield from self.first_path.render()
@@ -1958,7 +1956,7 @@ class PropertyListPath(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyListPath
     PropertyListPath	  ::=  	PropertyListPathNotEmpty?
     """
-    plpne: Optional[PropertyListPathNotEmpty] = None
+    plpne: PropertyListPathNotEmpty | None = None
 
     def render(self):
         if self.plpne:
@@ -1971,7 +1969,7 @@ class PropertyListPathNotEmpty(SPARQLGrammarBase):
     PropertyListPathNotEmpty	  ::=  	( VerbPath | VerbSimple ) ObjectListPath ( ';' ( ( VerbPath | VerbSimple ) ObjectList )? )*
     """
     first_pair: Tuple[VerbPath | VerbSimple, ObjectListPath]
-    other_pairs: Optional[List[Tuple[VerbPath | VerbSimple, ObjectList]]] = None
+    other_pairs: List[Tuple[VerbPath | VerbSimple, ObjectList]] | None = None
 
     def render(self):
         yield from self.first_pair[0].render()
@@ -1993,7 +1991,7 @@ class PropertyList(SPARQLGrammarBase):
     https://www.w3.org/TR/sparql11-query/#rPropertyList
     PropertyList	  ::=  	PropertyListNotEmpty?
     """
-    plne: Optional[PropertyListNotEmpty] = None
+    plne: PropertyListNotEmpty | None = None
 
     def render(self):
         if self.plne:
