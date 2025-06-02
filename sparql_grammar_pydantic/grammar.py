@@ -584,7 +584,7 @@ class GraphPatternNotTriples(SPARQLGrammarBase):
     """
 
     content: Union[
-        GroupOrUnionGraphPattern, OptionalGraphPattern, Filter, Bind, InlineData
+        GroupOrUnionGraphPattern, OptionalGraphPattern, ServiceGraphPattern, Filter, Bind, InlineData
     ]
 
     def render(self) -> Generator[str, None, None]:
@@ -892,6 +892,25 @@ class OptionalGraphPattern(SPARQLGrammarBase):
 
     def render(self) -> Generator[str, None, None]:
         yield "\nOPTIONAL "
+        yield from self.group_graph_pattern.render()
+
+
+class ServiceGraphPattern(SPARQLGrammarBase):
+    """
+    https://www.w3.org/TR/sparql11-query/#rServiceGraphPattern
+    ServiceGraphPattern	  ::=  	'SERVICE' 'SILENT'? VarOrIri GroupGraphPattern
+    """
+
+    silent: bool = False
+    var_or_iri: VarOrIri
+    group_graph_pattern: GroupGraphPattern
+
+    def render(self) -> Generator[str, None, None]:
+        yield "SERVICE "
+        if self.silent:
+            yield "SILENT "
+        yield from self.var_or_iri.render()
+        yield " "
         yield from self.group_graph_pattern.render()
 
 
@@ -1911,7 +1930,7 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
         return hash(self.content)
 
     @classmethod
-    def from_spo(cls, subject: Var | IRI | BlankNode, predicate: Var | IRI, object: Var | IRI | BlankNode):
+    def from_spo(cls, subject: Var | IRI | BlankNode, predicate: Var | IRI, object: Var | IRI | RDFLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL):
         """
         Convenience method to create a TriplesSameSubjectPath from a subject, predicate, and object.
         Currently supports only Var and IRI types for subject, predicate, and object.
@@ -1953,7 +1972,7 @@ class TriplesSameSubjectPath(SPARQLGrammarBase):
         # Handle objects
         if isinstance(object, Var):
             o_vot = VarOrTerm(varorterm=object)
-        elif isinstance(object, (IRI, BlankNode)):
+        elif isinstance(object, (IRI, RDFLiteral, NumericLiteral, BooleanLiteral, BlankNode, NIL)):
             o_vot = VarOrTerm(varorterm=GraphTerm(content=object))
         else:
             raise ValueError("o must be a Var, IRI or BlankNode")
