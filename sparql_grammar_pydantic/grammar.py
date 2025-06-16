@@ -217,23 +217,38 @@ class NumericLiteral(SPARQLGrammarBase):
 class TriplesBlock(SPARQLGrammarBase):
     """
     https://www.w3.org/TR/sparql11-query/#rTriplesBlock
-    TriplesBlock	  ::=  	TriplesSameSubjectPath ( '.' TriplesBlock? )?
+    TriplesBlock      ::=      TriplesSameSubjectPath ( '.' TriplesBlock? )?
     """
     triples: TriplesSameSubjectPath = None
     triples_block: TriplesBlock | None = None
 
     def render(self) -> Generator[str, None, None]:
-        if isinstance(self.triples, list):
-            for i, triple in enumerate(self.triples):
-                yield from triple.render()
-                # if i < len(self.triples) - 1:  # Check if it's not the last triple
-                yield "\n"
-        else:
-            yield from self.triples.render()
-            if self.triples_block:
-                yield " .\n"
-                yield from self.triples_block.render()
-                yield "\n"
+        yield from self.triples.render()
+        yield " ."
+        if self.triples_block:
+            yield "\n"
+            yield from self.triples_block.render()
+
+    def to_tssp_list(self) -> List[TriplesSameSubjectPath]:
+        """
+        Convert the nested TriplesBlock structure back to a flat list of TriplesSameSubjectPath objects.
+        This is the inverse operation of from_tssp_list.
+
+        Returns:
+            List[TriplesSameSubjectPath]: A list containing all TriplesSameSubjectPath objects
+                                        in the order they appear in the nested structure.
+        """
+        result = []
+
+        # Add the current triples if it exists
+        if self.triples is not None:
+            result.append(self.triples)
+
+        # Recursively collect from nested triples_block
+        if self.triples_block is not None:
+            result.extend(self.triples_block.to_tssp_list())
+
+        return result
 
     # TODO check if subject is same, if so, absorb into existing triples same subject path
     @classmethod
