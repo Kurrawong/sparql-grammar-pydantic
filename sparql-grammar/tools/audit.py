@@ -19,11 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.bnf import Production, parse_bnf  # noqa: E402
 
 
-def load_registry() -> dict[str, type]:
+def load_registry() -> dict[str, object]:
+    """Every implemented production: node classes plus alternation aliases."""
     import sparql_grammar  # noqa: F401  (imports every module, populating REGISTRY)
-    from sparql_grammar._base import REGISTRY
+    from sparql_grammar._base import ALIASES, REGISTRY
 
-    return REGISTRY
+    return {**REGISTRY, **ALIASES}
 
 
 def audit() -> tuple[list[Production], list[str], dict[str, type]]:
@@ -58,7 +59,12 @@ def main() -> int:
     total = len(parse_bnf())
     done = total - len(missing)
 
-    print(f"coverage: {done}/{total} productions implemented ({done / total:.0%})")
+    from sparql_grammar._base import ALIASES, REGISTRY
+
+    print(
+        f"coverage: {done}/{total} productions implemented ({done / total:.0%}) "
+        f"- {len(REGISTRY)} classes, {len(ALIASES)} alternation aliases"
+    )
     if missing:
         nt = [p.name for p in missing if not p.terminal]
         te = [p.name for p in missing if p.terminal]

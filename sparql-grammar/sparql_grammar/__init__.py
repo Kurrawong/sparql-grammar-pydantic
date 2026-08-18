@@ -5,9 +5,11 @@ renders itself back to SPARQL text. No pydantic, no runtime dependencies.
 """
 
 from ._base import (
+    ALIASES,
     Node,
     Terminal,
     ValidationError,
+    alias,
     debug_validation,
     production,
     set_debug_validation,
@@ -15,6 +17,12 @@ from ._base import (
 )
 from .terminals import *  # noqa: F401,F403
 from .terminals import __all__ as _terminals_all
+from .terms import *  # noqa: F401,F403
+from .terms import __all__ as _terms_all
+from .paths import *  # noqa: F401,F403
+from .paths import __all__ as _paths_all
+from .expressions import *  # noqa: F401,F403
+from .expressions import __all__ as _expressions_all
 
 __version__ = "0.1.0.dev0"
 
@@ -22,10 +30,15 @@ __all__ = [
     "Node",
     "Terminal",
     "ValidationError",
+    "alias",
     "debug_validation",
     "production",
     "set_debug_validation",
+    "ALIASES",
     "REGISTRY",
     "__version__",
     *_terminals_all,
+    *_terms_all,
+    *_paths_all,
+    *_expressions_all,
 ]

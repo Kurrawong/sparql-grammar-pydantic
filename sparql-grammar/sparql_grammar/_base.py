@@ -13,15 +13,18 @@ Design notes (see README for measurements):
 
 from __future__ import annotations
 
+import types
 import typing
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Callable, Iterator
 
 __all__ = [
     "Node",
     "Terminal",
     "production",
+    "alias",
     "REGISTRY",
+    "ALIASES",
     "ValidationError",
     "set_debug_validation",
     "debug_validation",
@@ -30,6 +33,13 @@ __all__ = [
 #: production name -> node class. Populated by @production; used by the audit tool
 #: to prove coverage against spec/sparql.bnf, and by the parser to map rules.
 REGISTRY: dict[str, type["Node"]] = {}
+
+#: production name -> union type, for productions that are a bare alternation of
+#: other productions (``Var ::= VAR1 | VAR2``). Modelling these as unions rather
+#: than wrapper classes is what keeps construction terse: a term goes straight
+#: where the grammar allows a term, instead of being boxed one level per
+#: alternation. The parser passes such rules straight through to their child.
+ALIASES: dict[str, object] = {}
 
 # Module-level flag so the __post_init__ check compiles down to one global lookup
 # when validation is off, which is the default and the hot path.
@@ -225,12 +235,54 @@ def production(cls: type | None = None, /, *, rule: str | None = None):
             target.__post_init__ = _post_init  # type: ignore[attr-defined]
         dc = dataclass(eq=True, slots=True, repr=False)(target)
         dc.__hash__ = Node.__hash__  # type: ignore[assignment]
+        _repoint_super_cells(target, dc)
         if name in REGISTRY and REGISTRY[name] is not dc:
             raise RuntimeError(f"duplicate production registration: {name}")
         REGISTRY[name] = dc
         return dc
 
     return wrap if cls is None else wrap(cls)
+
+
+def alias(name: str, union: object) -> object:
+    """Register a production that is a bare alternation of other productions.
+
+    ``VarOrTerm ::= Var | iri | RDFLiteral | ...`` adds no syntax of its own, so it
+    is represented as a union type rather than a node class. Registering it here
+    keeps the audit tool honest: the production is accounted for, and its Python
+    representation is recorded.
+    """
+    if name in ALIASES and ALIASES[name] is not union:
+        raise RuntimeError(f"duplicate alias registration: {name}")
+    if name in REGISTRY:
+        raise RuntimeError(f"{name} is already registered as a node class")
+    ALIASES[name] = union
+    return union
+
+
+def _repoint_super_cells(old: type, new: type) -> None:
+    """Make zero-argument ``super()`` work in a slotted dataclass.
+
+    ``dataclass(slots=True)`` cannot add ``__slots__`` to an existing class, so it
+    builds and returns a *new* class. Methods defined in the original class body
+    keep a ``__class__`` closure cell pointing at the original, and zero-argument
+    ``super()`` reads that cell - so it raises ``TypeError: super(type, obj): obj
+    must be an instance or subtype of type`` for instances of the new class.
+    Repointing the cell fixes every method at once, so subclasses can call
+    ``super()`` normally instead of naming a base class explicitly.
+    """
+    if old is new:
+        return
+    for member in vars(new).values():
+        function = getattr(member, "__func__", member)
+        if not isinstance(function, types.FunctionType):
+            continue
+        for cell in function.__closure__ or ():
+            try:
+                if cell.cell_contents is old:
+                    cell.cell_contents = new
+            except ValueError:  # empty cell
+                continue
 
 
 def _post_init(self: Node) -> None:
