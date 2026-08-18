@@ -1,0 +1,81 @@
+name: demo
+
+# Publishes the JupyterLite demo to GitHub Pages, so the library can be tried by
+# browsing to it. Enable Pages for the repository with Settings -> Pages -> Source:
+# "GitHub Actions" once, and this takes care of the rest.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: pip install -r demo/requirements-build.txt
+
+      - name: Regenerate the notebooks from their sources
+        run: |
+          python demo/build_notebooks.py
+          git diff --exit-code demo/notebooks \
+            || (echo "::error::demo/notebooks is stale - run python demo/build_notebooks.py" && exit 1)
+
+      - name: Run every demo cell
+        # a demo that raises must not be published
+        run: python demo/test_demos.py
+
+      - name: Build the wheel Pyodide will install
+        # the package is not on PyPI yet, so the demo installs it from a wheel
+        # served alongside the site
+        run: python -m build --wheel --outdir demo/files .
+
+      - name: Fetch the lark wheel for the parse extra
+        # lark is pure Python, so its wheel runs in Pyodide unchanged
+        # quoted as a block scalar: ':all:' would otherwise read as YAML mapping syntax
+        run: |
+          pip download lark --no-deps --only-binary=:all: --dest demo/files
+
+      - name: Build the JupyterLite site
+        working-directory: demo
+        run: |
+          # --piplite-wheels takes one wheel per flag, so build the list up
+          wheels=""
+          for wheel in files/*.whl; do
+            wheels="$wheels --piplite-wheels $wheel"
+          done
+          echo "bundling:$wheels"
+          jupyter lite build --contents notebooks $wheels --output-dir ../_site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    # only publish from the default branch; pull requests just prove it builds
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

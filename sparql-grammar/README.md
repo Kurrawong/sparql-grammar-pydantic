@@ -7,6 +7,10 @@ for a person.
 
 No runtime dependencies. No pydantic.
 
+**[Try it in your browser](https://kurrawong.github.io/sparql-grammar/lab/index.html)** —
+notebooks running on Pyodide, nothing to install. (Live once the repository has Pages
+enabled; see `demo/`.)
+
 ```python
 from sparql_grammar import iri, optional, select, var
 
@@ -159,6 +163,19 @@ parts, so generated classes end up with positional, anonymous fields — precise
 thing that made the previous API awkward to use. The grammar file proves
 *completeness*; people design the *API*. (`tools/audit.py --skeleton` will still write
 the boring first draft of a missing class.)
+
+## The browser demo
+
+`demo/` holds a [JupyterLite](https://jupyterlite.readthedocs.io/) site that runs the
+library in the browser, published to GitHub Pages by
+`.github/workflows/deploy-demo.yml`. It works because the package is pure Python with no
+runtime dependencies, and because `lark` is pure Python too, so the `parse` extra runs
+there as well.
+
+The notebooks are written as plain Python in `demo/src/`, not as notebook JSON, so the
+code can be run and tested like any other code. CI regenerates the notebooks, checks they
+are not stale, and executes every cell before publishing — a demo that raises cannot go
+out.
 
 ## Testing
 

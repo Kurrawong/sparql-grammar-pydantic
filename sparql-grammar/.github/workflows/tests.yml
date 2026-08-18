@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[parse,rdflib]" pytest
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Grammar coverage must stay complete
+        run: |
+          python tools/audit.py --strict
+          python tools/audit.py --lark
+
+      - name: Import time
+        # ~190 slotted dataclasses; this catches a regression in module-level work
+        run: |
+          python - <<'EOF'
+          import subprocess, sys, time
+          start = time.perf_counter()
+          subprocess.run([sys.executable, "-c", "import sparql_grammar"], check=True)
+          elapsed = (time.perf_counter() - start) * 1000
+          print(f"import took {elapsed:.0f} ms (including interpreter startup)")
+          EOF

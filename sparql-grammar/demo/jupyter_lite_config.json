@@ -1,0 +1,7 @@
+{
+  "LiteBuildConfig": {
+    "contents": ["notebooks"],
+    "output_dir": "../_site",
+    "apps": ["lab", "notebooks", "repl"]
+  }
+}
