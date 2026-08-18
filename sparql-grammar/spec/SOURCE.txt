@@ -1,0 +1,2 @@
+33fedad9fcd107994c19b458a9272e1c8a3e8750
+https://github.com/w3c/sparql-query spec/sparql.bnf (SPARQL 1.2)

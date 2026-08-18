@@ -1,0 +1,39 @@
+[project]
+name = "sparql-grammar"
+version = "0.1.0.dev0"
+description = "Typed Python objects for the SPARQL 1.2 grammar. No runtime dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+authors = [{ name = "david", email = "david@kurrawong.ai" }]
+keywords = ["sparql", "rdf", "grammar", "query-builder"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# String -> objects. Only needed to parse SPARQL text; building and rendering
+# queries never touches lark.
+parse = ["lark>=1.1.9"]
+# rdflib term interop (URIRef/Literal/BNode <-> grammar terms).
+rdflib = ["rdflib>=7.0.0"]
+
+[dependency-groups]
+dev = ["pytest>=8", "lark>=1.1.9", "rdflib>=7.0.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sparql_grammar"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 90
