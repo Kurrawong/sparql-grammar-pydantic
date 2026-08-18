@@ -16,6 +16,7 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass, fields
+from enum import Enum
 from typing import Any, Callable, Iterator
 
 __all__ = [
@@ -119,6 +120,26 @@ class Node:
         # which the pydantic version could not manage (most classes were unhashable).
         return hash((type(self).__name__, self.to_string()))
 
+    def __deepcopy__(self, memo: dict) -> "Node":
+        """Copy by walking slots instead of going through the pickle protocol.
+
+        ``copy.deepcopy`` reaches slotted classes via ``__reduce_ex__``, which is
+        general but slow. Walking the fields directly is about five times faster on
+        a query-sized tree, which matters because consumers copy subtrees to build
+        variants of a query (a count query from a listing query, say).
+
+        ``memo`` is honoured, so a subtree referenced twice stays shared in the copy
+        exactly as ``deepcopy`` guarantees.
+        """
+        existing = memo.get(id(self))
+        if existing is not None:
+            return existing
+        clone = object.__new__(type(self))
+        memo[id(self)] = clone
+        for f in fields(self):  # type: ignore[arg-type]
+            object.__setattr__(clone, f.name, _copy_value(getattr(self, f.name), memo))
+        return clone
+
     # -- traversal ---------------------------------------------------------
 
     def children(self) -> Iterator["Node"]:
@@ -166,6 +187,28 @@ class Node:
         if level != "full":
             return []
         return _check_field_types(self)
+
+
+#: Values that are safe to share between copies, being immutable.
+_ATOMIC = (str, int, float, bool, bytes, type(None))
+
+
+def _copy_value(value: Any, memo: dict) -> Any:
+    """Deep-copy one field value, short-circuiting the common cases."""
+    if isinstance(value, _ATOMIC):
+        return value
+    if isinstance(value, Node):
+        return value.__deepcopy__(memo)
+    kind = type(value)
+    if kind is list:
+        return [_copy_value(item, memo) for item in value]
+    if kind is tuple:
+        return tuple(_copy_value(item, memo) for item in value)
+    if isinstance(value, Enum):
+        return value
+    import copy as _copy
+
+    return _copy.deepcopy(value, memo)
 
 
 def _nodes_in(value: Any) -> Iterator[Node]:

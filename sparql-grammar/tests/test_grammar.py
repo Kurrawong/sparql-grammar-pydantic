@@ -223,7 +223,7 @@ class TestGraphPatterns:
 
     def test_filter_brackets_bare_expression(self):
         assert Filter(Expression.compare(Var("count"), "=", 101)).to_string() == (
-            "FILTER (?count=101)"
+            "FILTER (?count = 101)"
         )
 
     def test_bind(self):
@@ -338,7 +338,7 @@ class TestQueryForms:
             limit_offset=LimitOffsetClauses.create(limit=10, offset=20),
         )
         assert modifier.to_string() == (
-            "\nGROUP BY ?g\nHAVING (?n>1)\nORDER BY DESC(?n)\nLIMIT 10 OFFSET 20"
+            "\nGROUP BY ?g\nHAVING (?n > 1)\nORDER BY DESC(?n)\nLIMIT 10 OFFSET 20"
         )
 
     def test_having_renders(self):

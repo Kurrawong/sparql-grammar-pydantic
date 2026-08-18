@@ -132,13 +132,13 @@ class TestPaths:
 class TestExpressionBuilders:
     def test_compare(self):
         # count.py:114 in prez spells this out over 39 lines
-        assert Expression.compare(Var("count"), "=", 101).to_string() == "?count=101"
+        assert Expression.compare(Var("count"), "=", 101).to_string() == "?count = 101"
 
     def test_compare_all_operators(self):
         for operator in ("=", "!=", "<", ">", "<=", ">="):
             assert (
                 Expression.compare(Var("a"), operator, 1).to_string()
-                == f"?a{operator}1"
+                == f"?a {operator} 1"
             )
 
     def test_and_chain(self):
@@ -147,7 +147,7 @@ class TestExpressionBuilders:
                 Expression.compare(Var("a"), ">", 1),
                 Expression.compare(Var("b"), "<", 10),
             ).to_string()
-            == "?a>1 && ?b<10"
+            == "?a > 1 && ?b < 10"
         )
 
     def test_or_chain(self):
@@ -156,7 +156,7 @@ class TestExpressionBuilders:
                 Expression.compare(Var("a"), "=", 1),
                 Expression.compare(Var("b"), "=", 2),
             ).to_string()
-            == "?a=1 || ?b=2"
+            == "?a = 1 || ?b = 2"
         )
 
     def test_or_inside_and_is_bracketed(self):
@@ -168,7 +168,7 @@ class TestExpressionBuilders:
                 ),
                 Expression.compare(Var("b"), ">", 0),
             ).to_string()
-            == "(?a=1 || ?a=2) && ?b>0"
+            == "(?a = 1 || ?a = 2) && ?b > 0"
         )
 
     def test_negate_builtin(self):
@@ -181,7 +181,7 @@ class TestExpressionBuilders:
     def test_negate_compound_is_bracketed(self):
         assert (
             Expression.negate(Expression.compare(Var("a"), "=", 1)).to_string()
-            == "!(?a=1)"
+            == "!(?a = 1)"
         )
 
     def test_in_expression(self):
@@ -196,9 +196,9 @@ class TestExpressionBuilders:
         )
 
     def test_python_values_are_lifted(self):
-        assert Expression.compare(Var("a"), "=", "text").to_string() == '?a="text"'
-        assert Expression.compare(Var("a"), "=", True).to_string() == "?a=true"
-        assert Expression.compare(Var("a"), "=", 5).to_string() == "?a=5"
+        assert Expression.compare(Var("a"), "=", "text").to_string() == '?a = "text"'
+        assert Expression.compare(Var("a"), "=", True).to_string() == "?a = true"
+        assert Expression.compare(Var("a"), "=", 5).to_string() == "?a = 5"
 
     def test_from_primary_expression(self):
         # the constructor prez uses 25 times
@@ -305,7 +305,7 @@ class TestArithmetic:
             [(MultiplicativeOperator.TIMES, UnaryExpression(Var("b")))],
         )
         # the pydantic version rejected every non-empty operator list here
-        assert expression.to_string() == "?a*?b"
+        assert expression.to_string() == "?a * ?b"
 
     def test_addition_chain(self):
         from sparql_grammar import (
@@ -324,7 +324,7 @@ class TestArithmetic:
                 )
             ],
         )
-        assert expression.to_string() == "?a+1"
+        assert expression.to_string() == "?a + 1"
 
 
 class TestSlotsSuperRegression:

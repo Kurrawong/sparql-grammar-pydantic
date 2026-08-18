@@ -146,7 +146,7 @@ class TestUnknownNodes:
     def test_unhandled_node_still_formats_inline(self):
         """Anything without a layout handler renders via its own to_string."""
         assert format_sparql(IRI("http://x")) == "<http://x>"
-        assert format_sparql(Expression.compare(var("a"), "=", 1)) == "?a=1"
+        assert format_sparql(Expression.compare(var("a"), "=", 1)) == "?a = 1"
 
     def test_bare_triple(self):
         assert format_sparql(triple("?s", iri("http://p"), "?o")) == "?s <http://p> ?o"

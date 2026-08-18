@@ -267,7 +267,7 @@ class TestQuerySkeletons:
         )
         rendered = query.to_string()
         assert "GROUP BY ?g" in rendered
-        assert "HAVING (?n>1)" in rendered
+        assert "HAVING (?n > 1)" in rendered
 
     def test_construct(self):
         query = construct(

@@ -221,7 +221,9 @@ class MultiplicativeExpression(Node):
     def render(self, add: Add) -> None:
         self.base_expression.render(add)
         for operator, operand in self.additional_expressions:
+            add(" ")
             add(operator.value)
+            add(" ")
             operand.render(add)
 
 
@@ -244,7 +246,9 @@ class AdditiveExpression(Node):
     def render(self, add: Add) -> None:
         self.base_expression.render(add)
         for operator, operand in self.additional_expressions:
+            add(" ")
             add(operator.value)
+            add(" ")
             operand.render(add)
 
 
@@ -264,13 +268,9 @@ class RelationalExpression(Node):
         self.left.render(add)
         if self.operator is None:
             return
-        operator = self.operator
-        if operator in (RelationalOperator.IN, RelationalOperator.NOT_IN):
-            add(" ")
-            add(operator.value)
-            add(" ")
-        else:
-            add(operator.value)
+        add(" ")
+        add(self.operator.value)
+        add(" ")
         self.right.render(add)
 
 

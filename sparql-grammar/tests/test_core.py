@@ -177,3 +177,46 @@ class TestRegistry:
             @production(rule="IRIREF")
             class _Dupe(Node):
                 pass
+
+
+class TestDeepCopy:
+    """Node.__deepcopy__ walks slots directly; it must still behave like deepcopy."""
+
+    def test_copy_is_equal_but_independent(self):
+        import copy
+
+        original = _Block([triple(), triple(o="x")])
+        clone = copy.deepcopy(original)
+        assert clone == original
+        assert clone is not original
+        assert clone.triples[0] is not original.triples[0]
+
+    def test_mutating_the_copy_does_not_touch_the_original(self):
+        import copy
+
+        original = _Block([triple()])
+        clone = copy.deepcopy(original)
+        clone.triples[0].o = VAR1("changed")
+        assert original.triples[0].o == VAR1("o")
+
+    def test_shared_subtrees_stay_shared(self):
+        import copy
+
+        shared = triple()
+        clone = copy.deepcopy(_Block([shared, shared]))
+        assert clone.triples[0] is clone.triples[1]
+        assert clone.triples[0] is not shared
+
+    def test_enum_fields_survive(self):
+        import copy
+
+        from sparql_grammar import SelectClause
+
+        clause = SelectClause.create(VAR1("a"), distinct=True)
+        assert copy.deepcopy(clause).to_string() == clause.to_string()
+
+    def test_copy_of_a_deep_tree(self):
+        import copy
+
+        deep = _Block([triple(o=f"o{i}") for i in range(2000)])
+        assert copy.deepcopy(deep) == deep
