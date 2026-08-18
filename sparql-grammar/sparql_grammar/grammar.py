@@ -308,12 +308,15 @@ class TriplesSameSubject(Node):
     """TriplesSameSubject ::= VarOrTerm PropertyListNotEmpty | TriplesNode PropertyList | ReifiedTripleBlock"""
 
     subject: object
-    property_list: PropertyListNotEmpty
+    #: absent when the subject is a collection or blank-node property list that
+    #: carries its own predicates: '[ :p "v" ] .' is a complete triple
+    property_list: PropertyListNotEmpty | None = None
 
     def render(self, add: Add) -> None:
         self.subject.render(add)
-        add(" ")
-        self.property_list.render(add)
+        if self.property_list is not None:
+            add(" ")
+            self.property_list.render(add)
 
     @classmethod
     def from_spo(cls, subject: object, predicate: object, obj: object) -> TriplesSameSubject:
@@ -326,12 +329,15 @@ class TriplesSameSubjectPath(Node):
     """TriplesSameSubjectPath ::= VarOrTerm PropertyListPathNotEmpty | TriplesNodePath PropertyListPath | ReifiedTripleBlockPath"""
 
     subject: object
-    property_list_path: PropertyListPathNotEmpty
+    #: absent when the subject is a collection or blank-node property list that
+    #: carries its own predicates: '[ :p ?v ]' is a complete triple pattern
+    property_list_path: PropertyListPathNotEmpty | None = None
 
     def render(self, add: Add) -> None:
         self.subject.render(add)
-        add(" ")
-        self.property_list_path.render(add)
+        if self.property_list_path is not None:
+            add(" ")
+            self.property_list_path.render(add)
 
     @classmethod
     def from_spo(

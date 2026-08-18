@@ -100,6 +100,16 @@ class Node:
     def __str__(self) -> str:
         return self.to_string()
 
+    def to_pretty_string(self, indent: str = "  ", width: int = 0) -> str:
+        """Render as indented, readable SPARQL.
+
+        ``to_string`` stays the canonical, cheap path; layout lives in
+        :mod:`sparql_grammar.formatting` and costs nothing unless asked for.
+        """
+        from .formatting import format_sparql
+
+        return format_sparql(self, indent, width)
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.to_string()!r})"
 
@@ -112,15 +122,14 @@ class Node:
     # -- traversal ---------------------------------------------------------
 
     def children(self) -> Iterator["Node"]:
-        """Yield the direct child nodes held by this node's fields."""
+        """Yield the direct child nodes held by this node's fields.
+
+        Descends through nested lists and tuples, because several productions store
+        pairs: ``PropertyListPathNotEmpty.pairs`` is a list of
+        ``(verb, object_list)`` tuples, and its contents are children just the same.
+        """
         for f in fields(self):  # type: ignore[arg-type]
-            value = getattr(self, f.name)
-            if isinstance(value, Node):
-                yield value
-            elif isinstance(value, (list, tuple)):
-                for item in value:
-                    if isinstance(item, Node):
-                        yield item
+            yield from _nodes_in(getattr(self, f.name))
 
     def walk(self) -> Iterator["Node"]:
         """Yield this node and every descendant, depth first."""
@@ -157,6 +166,15 @@ class Node:
         if level != "full":
             return []
         return _check_field_types(self)
+
+
+def _nodes_in(value: Any) -> Iterator[Node]:
+    """Yield the nodes held directly by a field value, flattening containers."""
+    if isinstance(value, Node):
+        yield value
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _nodes_in(item)
 
 
 def _resolve_hints(cls: type) -> dict[str, Any]:

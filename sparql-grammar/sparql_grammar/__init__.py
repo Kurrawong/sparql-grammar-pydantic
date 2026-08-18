@@ -27,6 +27,7 @@ from .grammar import *  # noqa: F401,F403
 from .grammar import __all__ as _grammar_all
 from .update import *  # noqa: F401,F403
 from .update import __all__ as _update_all
+from .formatting import format_sparql
 from . import helpers
 from .helpers import *  # noqa: F401,F403
 from .helpers import __all__ as _helpers_all
@@ -51,5 +52,6 @@ __all__ = [
     *_grammar_all,
     *_update_all,
     *_helpers_all,
+    "format_sparql",
     "helpers",
 ]
