@@ -9,4 +9,5 @@ build/
 # demo build artefacts: wheels are built in CI, the site is published from there
 _site/
 demo/files/*.whl
+demo/.cache/
 demo/.jupyterlite.doit.db
