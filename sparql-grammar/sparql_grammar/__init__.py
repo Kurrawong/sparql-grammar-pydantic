@@ -23,6 +23,10 @@ from .paths import *  # noqa: F401,F403
 from .paths import __all__ as _paths_all
 from .expressions import *  # noqa: F401,F403
 from .expressions import __all__ as _expressions_all
+from .grammar import *  # noqa: F401,F403
+from .grammar import __all__ as _grammar_all
+from .update import *  # noqa: F401,F403
+from .update import __all__ as _update_all
 
 __version__ = "0.1.0.dev0"
 
@@ -41,4 +45,6 @@ __all__ = [
     *_terms_all,
     *_paths_all,
     *_expressions_all,
+    *_grammar_all,
+    *_update_all,
 ]

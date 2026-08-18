@@ -37,7 +37,11 @@ IRIish = Union[IRI, PNAME_LN, PNAME_NS]
 
 
 class PathMod(str, Enum):
-    """PathMod ::= '?' | '*' | '+'"""
+    """PathMod ::= '?' | '*' | '+'
+
+    An enum rather than a node class: the production is a choice between three
+    literals, so there is nothing to hold.
+    """
 
     ZERO_OR_ONE = "?"
     ZERO_OR_MORE = "*"
@@ -45,6 +49,9 @@ class PathMod(str, Enum):
 
     def render(self, add: Add) -> None:
         add(self.value)
+
+
+alias("PathMod", PathMod)
 
 
 @production(rule="PathPrimary")
