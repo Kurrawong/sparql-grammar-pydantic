@@ -27,6 +27,9 @@ from .grammar import *  # noqa: F401,F403
 from .grammar import __all__ as _grammar_all
 from .update import *  # noqa: F401,F403
 from .update import __all__ as _update_all
+from . import helpers
+from .helpers import *  # noqa: F401,F403
+from .helpers import __all__ as _helpers_all
 
 __version__ = "0.1.0.dev0"
 
@@ -47,4 +50,6 @@ __all__ = [
     *_expressions_all,
     *_grammar_all,
     *_update_all,
+    *_helpers_all,
+    "helpers",
 ]
