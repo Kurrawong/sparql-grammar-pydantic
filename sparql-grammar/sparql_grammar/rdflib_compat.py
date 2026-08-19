@@ -97,25 +97,16 @@ def _literal_to_grammar(value: Any, typed_numerics: bool) -> Node:
     if value.language:
         return RDFLiteral.langed(str(value), _language_with_direction(value))
     if datatype is not None:
-        return RDFLiteral.typed(_escaped(str(value)), IRI(datatype))
-    return RDFLiteral(_escaped(str(value)))
+        return RDFLiteral.typed(str(value), IRI(datatype))
+    # not escaped here: RDFLiteral escapes plain text when it renders, and doing it
+    # in both places would double every backslash
+    return RDFLiteral(str(value))
 
 
 def _language_with_direction(value: Any) -> str:
     """Carry an RDF 1.2 base direction through to SPARQL 1.2 LANG_DIR when present."""
     direction = getattr(value, "direction", None)
     return f"{value.language}--{direction}" if direction else str(value.language)
-
-
-def _escaped(text: str) -> str:
-    """Escape what a double-quoted SPARQL string literal cannot hold verbatim."""
-    return (
-        text.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
 
 
 def from_grammar_term(node: Node) -> Identifier:

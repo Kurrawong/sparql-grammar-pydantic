@@ -41,10 +41,54 @@ print(query.to_pretty_string())
 print(query.to_pretty_string(indent="    "))
 
 # %% [markdown]
-# ## Validation is opt-in
+# ## Parameterised queries and untrusted input
 #
-# Construction never validates, because that is the hot path. Nothing stops you
-# building something wrong; ask for a check when you want one.
+# The usual shape is a skeleton built once from values you control, with inputs
+# substituted per request. Two different jobs at that boundary:
+#
+# Text **can** be escaped, so it always is — a literal is safe from hostile input
+# with no ceremony.
+
+# %%
+payload = 'x" . ?s ?p ?o . #'
+print(literal(payload).to_string())
+print(select("?s", where=[("?s", iri("http://p"), literal(payload))]).to_string())
+# still one triple: the payload could not break out
+
+# %% [markdown]
+# IRIs, variable names and language tags have **no** escape syntax, so a bad one can
+# only be refused. The string-accepting helpers validate by default.
+
+# %%
+for label, call in [
+    ("iri", lambda: iri("http://x> . ?s ?p ?o . <http://y")),
+    ("var", lambda: var("s . ?x ?y")),
+    ("lang", lambda: literal("x", lang='en" . #')),
+]:
+    try:
+        call()
+        print(f"{label}: accepted")
+    except ValidationError as error:
+        print(f"{label}: refused - {error.errors[0][:60]}")
+
+# %% [markdown]
+# So: build the skeleton from your own values, and pass each parameter through
+# `checked()`. It costs a fraction of a microsecond per term, against the
+# milliseconds a whole-tree `validate()` would take.
+
+# %%
+template = select("?s", where=[("?s", iri("ex:p"), var("value"))],
+                  prefixes={"ex": "http://example.com/"})
+inputs = ["http://example.com/a", "http://example.com/b"]
+print(values("value", [checked(v) for v in inputs]).to_string())
+print()
+print(template.to_string())
+
+# %% [markdown]
+# ## Whole-tree validation is opt-in
+#
+# Beyond the per-term checks above, a whole tree can be checked on demand. This is
+# for tests and development - full validation costs several times a plain build.
 
 # %%
 bad = VAR1("not a valid name!")

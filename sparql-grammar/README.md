@@ -73,11 +73,23 @@ using both real class trees (a prez-shaped `CONSTRUCT` + `WHERE`):
 
 | triples | | 0.1.11 | this | |
 |---|---|---|---|---|
-| 400 | build | 14.1 ms | 1.75 ms | 8.0× |
-| 400 | render | 39.4 ms | 0.85 ms | 46× |
-| 400 | deepcopy | 31.5 ms | 7.3 ms | 4.3× |
-| 800 | render | 148.8 ms | 1.88 ms | 79× |
+| 400 | build | 15.7 ms | 2.0 ms | 7.7× |
+| 400 | render | 39–65 ms | 0.9 ms | 45–76× |
+| 400 | deepcopy | 36.4 ms | 5.6 ms | 6.5× |
+| 400 | equality | 7.2 ms | 0.8 ms | 9.2× |
+| 400 | collect triples | 256 ms | 5.2 ms | 49× |
+| 400 | hash | unhashable | 0.5 ms | — |
+| 800 | render | 148.8 ms | 1.9 ms | 79× |
 | 10,000 | render | 21.6 **s** | 12.7 ms | 1700× |
+
+Other figures at 400 triples: tree memory 2016 KB → 382 KB (5.3× less), and 1.63×
+fewer nodes. Formatted rendering (`to_pretty_string()`) is 1.3 ms. Parsing, with the
+`parse` extra, is 0.67 ms per query under LALR. Importing the package takes ~100 ms.
+
+The old library's render time swings between 39 ms and 65 ms across runs — it
+allocates heavily and is sensitive to garbage-collection state — so the conservative
+figure is quoted. Run `python benchmarks/bench.py` to reproduce all of it; it refuses
+to report timings if the two libraries stop rendering the same query.
 
 The speedup grows with query size because the old rendering was quadratic. Per doubling
 of input, the old library's render time grew 3.3–3.7×; this one grows 1.8–2.2×, i.e.
@@ -124,21 +136,78 @@ Coercion only interprets what is unambiguous: `?x` is a variable, `<...>` is an 
 `http://...` string is **not** guessed to be an IRI — use `iri()` — because that guess
 silently misreads literals that look like URLs.
 
-## Validation is opt-in
+## Parameterised queries, and untrusted input
 
-Construction never validates; that is the hot path. Ask for it when you want it:
+The usual shape is a query skeleton built once from values the program controls, with
+inputs substituted per request. That makes the term constructors the only place input
+safety matters, and there are two different jobs to do there:
+
+**Text can be escaped, so it always is.** A string literal is safe to build from
+hostile input with no ceremony:
 
 ```python
-node.validate("terminals")   # terminal values against their spec regex
-node.validate("full")        # terminals plus field types
+literal('x" . ?s ?p ?o . #')     # -> "x\" . ?s ?p ?o . #"   one literal, still
+```
 
-with debug_validation():     # or check everything as it is constructed
+**IRIs, variable names and language tags cannot be escaped** — there is no escape
+syntax for them — so a bad one can only be refused. The string-accepting helpers
+therefore validate by default:
+
+```python
+iri("http://x> . ?s ?p ?o . <http://y")   # ValidationError
+var("s . ?x ?y")                          # ValidationError
+literal("x", lang='en" . #')              # ValidationError
+checked(value)                            # the same, named for the boundary
+```
+
+So the pattern is: build the skeleton from your own values, and pass each incoming
+parameter through `checked()` (or just let the helpers do it):
+
+```python
+template = select("?s", where=[("?s", iri("ex:p"), var("value"))])   # once, trusted
+...
+row = values("value", [checked(v) for v in request_values])          # per request
+```
+
+Checking costs about 0.3 µs per term — a fraction of a microsecond, against the
+milliseconds a whole-tree `validate()` would take. Pass `check=False`, or use the
+production constructors (`IRI(...)`, `Var(...)`) which never validate, for values the
+program produced itself.
+
+## Validation of a whole tree is opt-in
+
+Beyond the per-term checks above, a whole tree can be validated on demand. This is
+for tests and development; it is not cheap.
+
+```python
+node.validate("terminals")           # terminal values against their spec regex
+node.validate("full")                # terminals plus every field's type
+
+with debug_validation("terminals"):  # or check as each node is constructed
+    ...
+with debug_validation():             # "full" is the default level
     ...
 ```
 
+What each option costs, on a 400-triple query (min-of-5):
+
+| mode | cost | vs a plain build |
+|---|---|---|
+| default — no whole-tree validation | 1.98 ms build | 1.0× |
+| `debug_validation("terminals")` while building | 2.58 ms | 1.3× |
+| `debug_validation()` — full — while building | 13.7 ms | 6.9× |
+| `validate("terminals")` as a pass | +8.6 ms | 4.4× |
+| `validate("full")` as a pass | +20.7 ms | 10.5× |
+
+Worth reading twice: building with full construction-time validation (13.7 ms) costs
+about what the *old* library's always-on validation cost (15.7 ms). Being opt-in is
+where most of the build speedup comes from, so leave it off in production —
+`debug_validation("terminals")` is the one cheap enough to develop with.
+
 Constraints that types cannot express are checked here rather than left unenforced:
 `SEPARATOR` only on `GROUP_CONCAT`, `*` only on `COUNT`, `MODIFY` needing a `DELETE` or
-`INSERT` clause. All three were broken or unenforceable before.
+`INSERT` clause, a literal having a language *or* a datatype. All were broken or
+unenforceable before.
 
 ## Grammar coverage is a fact, not a claim
 

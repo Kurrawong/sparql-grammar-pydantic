@@ -257,6 +257,10 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"  {label:3s} {n:>6} triples: {type(exc).__name__}")
 
+    print("\nnew-library operations, and what each validation option costs")
+    print("  (all validation is opt-in and off by default)")
+    _validation_report(build_new, 400)
+
     print("\nexpression ladder (one FILTER comparison)")
     old_expression = _old_comparison(old)
     new_expression = _new_comparison()
@@ -269,6 +273,46 @@ def main() -> int:
         f"new {count_nodes_new(new_built)}"
     )
     return 0
+
+
+def _validation_report(build_new, n: int) -> None:
+    """Cost of every validation option, plus the traversal-based operations."""
+    import copy as _copy
+
+    from sparql_grammar import TriplesSameSubjectPath, set_debug_validation
+
+    template, where = build_new(n)
+
+    def with_debug(level):
+        def run():
+            set_debug_validation(level)
+            try:
+                build_new(n)
+            finally:
+                set_debug_validation(False)
+
+        return run
+
+    rows = [
+        ("build (no validation)", lambda: build_new(n), 3),
+        ("build + debug 'terminals'", with_debug("terminals"), 3),
+        ("build + debug 'full'", with_debug("full"), 3),
+        ("validate('terminals') pass", lambda: (template.validate("terminals"), where.validate("terminals")), 3),
+        ("validate('full') pass", lambda: (template.validate("full"), where.validate("full")), 3),
+        ("render to_string()", lambda: (template.to_string(), where.to_string()), 3),
+        ("render to_pretty_string()", lambda: (template.to_pretty_string(), where.to_pretty_string()), 3),
+        ("deepcopy", lambda: _copy.deepcopy(where), 3),
+        ("hash(tree)", lambda: hash(where), 10),
+        ("collect(TriplesSameSubjectPath)", lambda: where.collect(TriplesSameSubjectPath), 5),
+    ]
+    baseline = None
+    print(f"  {n} triples")
+    for label, call, number in rows:
+        # min-of-5: the least noisy estimator for a timing like this
+        ms = min(timeit.repeat(call, number=number, repeat=5)) / number * 1000
+        if baseline is None:
+            baseline = ms
+        print(f"    {label:32s} {_fmt(ms)}  {ms / baseline:5.1f}x build")
 
 
 def _old_comparison(old):

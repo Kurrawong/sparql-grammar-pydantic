@@ -14,10 +14,14 @@ Two shaping decisions worth knowing, both aimed at cutting nesting depth:
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar, Union
 
 from ._base import Add, Node, alias, production
 from .terminals import (
+    IRIREF_INNER_RE,
+    LANG_DIR_INNER_RE,
+    VARNAME_RE,
     ANON,
     BLANK_NODE_LABEL,
     DECIMAL,
@@ -40,11 +44,13 @@ from .terminals import (
     STRING_LITERAL_LONG2,
     VAR1,
     VAR2,
+    escape_string,
 )
 
 __all__ = [
     "Var",
     "IRI",
+    "iri_is_valid",
     "PrefixedName",
     "String",
     "RDFLiteral",
@@ -59,6 +65,31 @@ __all__ = [
 ]
 
 
+_VARNAME = re.compile(VARNAME_RE)
+_IRI_TEXT = re.compile(IRIREF_INNER_RE)
+_LANG_DIR = re.compile(LANG_DIR_INNER_RE)
+
+#: Characters that can never appear in an IRI. A backslash is excluded because it is
+#: legal inside a \uXXXX escape, which is handled by the second stage below.
+_IRI_FORBIDDEN = re.compile(r'[<>"{}|^\x00-\x20]')
+
+
+def iri_is_valid(text: str) -> bool:
+    r"""Whether ``text`` can be rendered inside ``<...>`` without changing the query.
+
+    Two stages, because the full spec pattern alternates per character to allow
+    ``\uXXXX`` escapes and is five times slower than a plain scan. Almost no IRI
+    contains a backslash, so the scan answers on its own; when one does, the spec
+    pattern decides. The two agree on every input - the split is only for speed, and
+    it is what makes checking cheap enough to be the default.
+    """
+    if _IRI_FORBIDDEN.search(text):
+        return False
+    if "\\" in text:
+        return _IRI_TEXT.fullmatch(text) is not None
+    return True
+
+
 @production(rule="Var")
 class Var(Node):
     """Var ::= VAR1 | VAR2
@@ -68,6 +99,12 @@ class Var(Node):
 
     value: str
     sigil: str = "?"
+
+    def _check(self, level: str) -> list[str]:
+        errors = super()._check(level)
+        if not _VARNAME.fullmatch(self.value):
+            errors.append(f"Var: {self.value!r} is not a valid variable name")
+        return errors
 
     def render(self, add: Add) -> None:
         add(self.sigil)
@@ -104,12 +141,34 @@ class IRI(Node):
         add(self.value)
         add(">")
 
+    def _check(self, level: str) -> list[str]:
+        errors = super()._check(level)
+        if not iri_is_valid(self.value):
+            # An IRI has no escape syntax for the delimiters, so a value carrying
+            # '>' or whitespace cannot be rendered safely - it can only be refused.
+            errors.append(
+                f"IRI: {self.value!r} is not a valid IRI "
+                "(it contains a character that would terminate the IRI)"
+            )
+        return errors
+
     @classmethod
     def from_string(cls, text: str) -> IRI:
         text = text.strip()
         if text.startswith("<") and text.endswith(">"):
             text = text[1:-1]
         return cls(text)
+
+    @classmethod
+    def checked(cls, text: str) -> IRI:
+        """Build an IRI, refusing anything that is not one.
+
+        The constructor to reach for at the boundary where untrusted input enters a
+        query: see :func:`sparql_grammar.helpers.iri` with ``check=True``.
+        """
+        node = cls.from_string(text)
+        node.validate("terminals")
+        return node
 
     @staticmethod
     def prefixed(prefix: str, local: str = "") -> PNAME_LN | PNAME_NS:
@@ -173,11 +232,30 @@ class RDFLiteral(Node):
     lang_dir: LANG_DIR | None = None
     datatype: object = None
 
+    def _check(self, level: str) -> list[str]:
+        errors = super()._check(level)
+        if self.lang_dir is not None and self.datatype is not None:
+            errors.append("RDFLiteral: a literal has a language or a datatype, not both")
+        # The text is escaped when rendered, but a language tag and a datatype IRI
+        # are not escapable, so they are checked here rather than being left to a
+        # whole-tree walk: they are part of what makes this one literal safe.
+        if self.lang_dir is not None and not _LANG_DIR.fullmatch(self.lang_dir.value):
+            errors.append(
+                f"RDFLiteral: {self.lang_dir.value!r} is not a valid language tag"
+            )
+        if self.datatype is not None:
+            errors.extend(self.datatype._check(level))
+        return errors
+
     def render(self, add: Add) -> None:
         value = self.value
         if isinstance(value, str):
+            # Plain text is raw content, so it is escaped on the way out. Without
+            # this, a value containing a quote closes its own literal and whatever
+            # follows becomes part of the query. Pass a String terminal instead to
+            # take responsibility for the surface form yourself.
             add('"')
-            add(value)
+            add(escape_string(value))
             add('"')
         else:
             value.render(add)

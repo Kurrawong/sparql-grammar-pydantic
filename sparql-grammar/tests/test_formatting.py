@@ -133,13 +133,28 @@ class TestConstructs:
 class TestLiteralIntegrity:
     """Formatting must never change what a query means."""
 
-    def test_newlines_inside_literals_are_preserved(self):
-        query = select("?s", where=[("?s", iri("http://p"), literal("line one\nline two"))])
-        assert "line one\nline two" in format_sparql(query)
+    def test_escaped_newlines_pass_through_untouched(self):
+        """A newline cannot appear raw in a short literal, so it renders escaped.
 
-    def test_tabs_inside_literals_are_preserved(self):
+        What matters here is that the formatter does not then alter it: the two-
+        character escape must survive layout unchanged.
+        """
+        query = select("?s", where=[("?s", iri("http://p"), literal("line one\nline two"))])
+        assert "line one\\nline two" in format_sparql(query)
+
+    def test_escaped_tabs_pass_through_untouched(self):
         query = select("?s", where=[("?s", iri("http://p"), literal("a\tb"))])
-        assert "a\tb" in format_sparql(query)
+        assert "a\\tb" in format_sparql(query)
+
+    def test_long_literals_keep_real_newlines(self):
+        """A long literal may hold newlines verbatim, and formatting must keep them."""
+        from sparql_grammar import RDFLiteral, STRING_LITERAL_LONG1
+
+        query = select(
+            "?s",
+            where=[("?s", iri("http://p"), RDFLiteral(STRING_LITERAL_LONG1("one\ntwo")))],
+        )
+        assert "one\ntwo" in format_sparql(query)
 
 
 class TestUnknownNodes:

@@ -17,6 +17,7 @@ from typing import ClassVar
 from ._base import Add, Node, Terminal, production
 
 __all__ = [
+    "escape_string",
     "HEX", "PERCENT", "PN_LOCAL_ESC", "PLX", "PN_CHARS_BASE", "PN_CHARS_U",
     "PN_CHARS", "PN_PREFIX", "PN_LOCAL", "VARNAME", "WS", "ECHAR", "UCHAR",
     "IRIREF", "PNAME_NS", "PNAME_LN", "BLANK_NODE_LABEL", "VAR1", "VAR2",
@@ -94,6 +95,28 @@ STRING_LITERAL_LONG2_INNER_RE = rf"(?:(?:\x22|\x22\x22)?(?:[^\x22\x5C]|{ECHAR_RE
 
 def _c(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
+
+
+#: Characters a double- or single-quoted string literal cannot carry verbatim.
+_MUST_ESCAPE = '\\"\'\n\r\t'
+_ESCAPES = str.maketrans(
+    {"\\": "\\\\", '"': '\\"', "'": "\\'", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+)
+
+
+def escape_string(text: str) -> str:
+    """Escape text so it is safe inside a quoted SPARQL string literal.
+
+    This is what stops an untrusted value from closing its own literal and adding
+    clauses to the query. It is applied automatically when a literal is given plain
+    text, so the safe behaviour is the default rather than something to remember.
+
+    The membership test first is a fast path: the overwhelming majority of values
+    contain nothing to escape, and translate() on a long string is not free.
+    """
+    if not any(character in text for character in _MUST_ESCAPE):
+        return text
+    return text.translate(_ESCAPES)
 
 
 # ---------------------------------------------------------------------------

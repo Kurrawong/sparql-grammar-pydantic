@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from ._base import Node
+from ._base import Node, ValidationError
 from .expressions import (
     Aggregate,
     BuiltIn,
@@ -85,7 +85,7 @@ from .update import (
 
 __all__ = [
     # terms
-    "var", "iri", "literal", "term",
+    "var", "iri", "literal", "term", "checked",
     # triples
     "triple", "triples", "tss", "tss_list", "tss_and_tssp",
     # patterns
@@ -106,44 +106,91 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def var(name: str | Var) -> Var:
-    """``var("s")`` or ``var("?s")`` -> ``?s``"""
-    return name if isinstance(name, Var) else Var.from_string(name)
+def _verify(node: Node) -> Node:
+    """Check one freshly built term, without the cost of a whole-tree walk.
+
+    ``validate()`` walks the tree and collects errors, which is the right shape for
+    checking a query but roughly three times the cost of checking a single leaf. The
+    terms built here are leaves, so their own check is the whole check.
+    """
+    errors = node._check("terminals")
+    if errors:
+        raise ValidationError(errors)
+    return node
 
 
-def iri(value: str | Node) -> object:
+def var(name: str | Var, check: bool = True) -> Var:
+    """``var("s")`` or ``var("?s")`` -> ``?s``
+
+    Validated by default, for the same reason as :func:`iri`: a variable name has no
+    escape syntax either. Pass ``check=False`` to skip it.
+    """
+    if isinstance(name, Var):
+        return _verify(name) if check else name
+    node = Var.from_string(name)
+    return _verify(node) if check else node
+
+
+def iri(value: str | Node, check: bool = True) -> object:
     """``iri("http://x")`` -> ``<http://x>``; ``iri("skos:broader")`` -> ``skos:broader``
 
     A value with no scheme separator but a colon is read as a prefixed name.
+
+    The value is validated by default. An IRI has no escape syntax, so a value
+    containing ``>`` or whitespace cannot be rendered safely - it can only be
+    refused, rather than silently changing what the query means. This is the helper
+    that untrusted strings arrive through, so it is safe by default; the check costs
+    well under a microsecond.
+
+    Pass ``check=False`` in a hot loop over values the program itself produced, or
+    use the ``IRI`` constructor directly, which never validates.
     """
     if isinstance(value, Node):
+        # a node handed in may be a whole subtree, so check all of it
+        if check:
+            value.validate("terminals")
         return value
     text = value.strip()
     if text.startswith("<") and text.endswith(">"):
-        return IRI(text[1:-1])
-    if "://" not in text and ":" in text:
+        node = IRI(text[1:-1])
+    elif "://" not in text and ":" in text:
         prefix, _, local = text.partition(":")
-        return PNAME_LN(text) if local else PNAME_NS(prefix)
-    return IRI(text)
+        node = PNAME_LN(text) if local else PNAME_NS(prefix)
+    else:
+        node = IRI(text)
+    return _verify(node) if check else node
 
 
 def literal(
-    value: object, lang: str | None = None, datatype: str | Node | None = None
+    value: object,
+    lang: str | None = None,
+    datatype: str | Node | None = None,
+    check: bool = True,
 ) -> Node:
-    """A literal term. ``bool`` and ``int`` map to their SPARQL forms."""
+    """A literal term. ``bool`` and ``int`` map to their SPARQL forms.
+
+    The text itself is escaped when rendered, so it is safe from untrusted input
+    either way. The check - on by default, as with :func:`iri` - covers the language
+    tag and the datatype IRI, which have no escape syntax and so can only be refused.
+    For plain text with neither, it costs almost nothing.
+    """
     if isinstance(value, bool):
-        return BooleanLiteral(value)
-    if isinstance(value, int):
-        return INTEGER(str(value))
-    if lang is not None:
-        return RDFLiteral.langed(str(value), lang)
-    if datatype is not None:
-        return RDFLiteral.typed(str(value), datatype)
-    return RDFLiteral(str(value))
+        node: Node = BooleanLiteral(value)
+    elif isinstance(value, int):
+        node = INTEGER(str(value))
+    elif lang is not None:
+        node = RDFLiteral.langed(str(value), lang)
+    elif datatype is not None:
+        node = RDFLiteral.typed(str(value), datatype)
+    else:
+        node = RDFLiteral(str(value))
+    return _verify(node) if check else node
 
 
-def term(value: object) -> object:
+def term(value: object, check: bool = True) -> object:
     """Coerce a Python value or an existing node into a term node.
+
+    Validated by default, as with :func:`iri` and :func:`var`.
 
     Strings are only interpreted where the syntax is unambiguous: ``?x``/``$x`` is a
     variable and ``<...>`` is an IRI. Anything else becomes a plain literal - use
@@ -152,17 +199,37 @@ def term(value: object) -> object:
     happens to look like a URL.
     """
     if isinstance(value, Node):
+        if check:
+            value.validate("terminals")
         return value
     if isinstance(value, bool) or isinstance(value, int):
-        return literal(value)
+        return literal(value, check=check)
     if isinstance(value, str):
         text = value.strip()
         if text[:1] in ("?", "$"):
-            return var(text)
+            return var(text, check=check)
         if text.startswith("<") and text.endswith(">"):
-            return IRI(text[1:-1])
-        return RDFLiteral(text)
-    return literal(value)
+            return iri(text, check=check)
+        return literal(text, check=check)
+    return literal(value, check=check)
+
+
+def checked(value: object) -> object:
+    """Coerce an untrusted value into a term, refusing anything unrenderable.
+
+    The boundary function for parameterised queries. Build the query skeleton once
+    from values you control - it needs no checking, and checking it costs several
+    times what building it does - then pass each incoming parameter through here:
+
+        template = select("?s", where=[("?s", iri("ex:p"), var("value"))])   # trusted
+        ...
+        row = values("value", [checked(v) for v in request_values])          # untrusted
+
+    Equivalent to ``term(value)`` - which validates by default - but named so the
+    boundary is obvious at the call site. Cost is a fraction of a microsecond per
+    term, rather than the milliseconds a whole-tree ``validate()`` would take.
+    """
+    return term(value, check=True)
 
 
 def _predicate(value: object) -> object:
@@ -176,7 +243,7 @@ def _predicate(value: object) -> object:
     if isinstance(value, str):
         text = value.strip()
         return var(text) if text[:1] in ("?", "$") else iri(text)
-    return term(value)
+    return term(value)  # validated by default
 
 
 # ---------------------------------------------------------------------------
