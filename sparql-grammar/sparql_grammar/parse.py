@@ -131,6 +131,7 @@ from .grammar import (
     TriplesSameSubject,
     TriplesSameSubjectPath,
     TriplesTemplate,
+    UNDEF,
     ValuesClause,
     VarOrReifierId,
     VersionDecl,
@@ -294,6 +295,8 @@ class _Builder:
         "STRING_LITERAL_LONG2": lambda text: STRING_LITERAL_LONG2(text[3:-3]),
         "NIL": lambda text: NIL(),
         "ANON": lambda text: ANON(),
+        # the VALUES marker: a node, so a data block never holds a bare string
+        "UNDEF": lambda text: UNDEF,
     }
 
     #: Keywords that carry no information once the rule is known. Matched on the
@@ -1092,16 +1095,8 @@ class _Builder:
         """group_graph_pattern_sub_other: graph_pattern_not_triples DOT? triples_block?"""
         return list(c)
 
-    def r_verb_object_list(self, c, _):
-        return self._verb_object_pairs(c, ObjectList)
-
     def r_property_list_path_not_empty_rest(self, c, _):
         return self._verb_object_pairs(c, ObjectListPath)
-
-    def r_data_block_value_group(self, c, _):
-        # 'data_block_value_group: "(" data_block_value* ")" | NIL': as with ArgList,
-        # the NIL alternative *is* the empty row rather than a value within it
-        return self._expressions(c)
 
     def r_true(self, c, _):
         return BooleanLiteral(True)
@@ -1159,6 +1154,8 @@ def _repr_node(value: Any, indent: int = 0) -> str:
     from dataclasses import fields, is_dataclass
 
     pad = "    " * (indent + 1)
+    if value is UNDEF:
+        return "UNDEF"  # the marker is a singleton, so name it rather than rebuild it
     if isinstance(value, Node) and is_dataclass(value):
         parts = []
         for field in fields(value):

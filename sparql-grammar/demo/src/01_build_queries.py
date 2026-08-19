@@ -16,14 +16,14 @@ await piplite.install(["sparql-grammar", "lark"])
 # %%
 from sparql_grammar import *
 
-# The short way in: helpers that coerce their arguments.
+# The short way in: helpers that assemble the productions for you.
 query = select(
-    "?concept",
-    "?label",
+    var("concept"),
+    var("label"),
     where=[
-        ("?concept", "a", iri("skos:Concept")),
-        ("?concept", iri("skos:prefLabel"), "?label"),
-        optional(("?concept", iri("skos:broader"), "?parent")),
+        (var("concept"), "a", iri("skos:Concept")),
+        (var("concept"), iri("skos:prefLabel"), var("label")),
+        optional((var("concept"), iri("skos:broader"), var("parent"))),
     ],
     limit=10,
     prefixes={"skos": "http://www.w3.org/2004/02/skos/core#"},
@@ -32,16 +32,27 @@ query = select(
 print(query.to_pretty_string())
 
 # %% [markdown]
-# ## Coercion rules
+# ## Terms are explicit
 #
-# Strings are only interpreted where the syntax is unambiguous: `?x` is a variable,
-# `<...>` is an IRI, `a` in predicate position is `rdf:type`. Anything else is a
-# literal — a bare `http://...` string is *not* guessed to be an IRI, because that
-# guess silently misreads literals that look like URLs.
+# No string is ever read as a term. `var()`, `iri()` and `literal()` say which one you
+# mean, the same way rdflib makes you choose between `URIRef` and `Literal`. The text
+# alone cannot tell you: `"<http://x>"` is as plausibly a literal as an IRI, and a
+# value read as a *variable* would widen a query rather than parameterise it.
+#
+# Python values that already carry their type — `int`, `float`, `bool` — need no help.
+# The one keyword that stays a string is `a`, which is `rdf:type`, not a term.
 
 # %%
-for value in ["?s", "<http://ex/p>", "http://ex/p", "hello", 42, True]:
-    print(f"{value!r:20} -> {type(term(value)).__name__:16} {term(value)}")
+for value in [var("s"), iri("http://ex/p"), literal("http://ex/p"), 42, -1.5, True]:
+    print(f"{str(value):22} {type(term(value)).__name__}")
+
+# %%
+# and a string in a term position is refused, with the fix in the message
+for text in ["?s", "<http://ex/p>", "hello"]:
+    try:
+        term(text)
+    except TypeError as error:
+        print(f"{text!r:16} {error}")
 
 # %% [markdown]
 # ## The parts that used to be painful
@@ -56,7 +67,7 @@ print(Expression.all_of(
     Expression.compare(var("a"), ">", 1),
     Expression.compare(var("b"), "<", 10),
 ))
-print(Expression.negate(is_blank("?node")))
+print(Expression.negate(is_blank(var("node"))))
 print(PathAlternative.seq(iri("ex:a"), iri("ex:b")))
 print(PathAlternative.mod(iri("ex:broader"), "+"))
 print(Aggregate.count(var("x"), distinct=True))
@@ -68,17 +79,17 @@ print(Aggregate.count(var("x"), distinct=True))
 
 # %%
 query = select(
-    "?scheme",
+    var("scheme"),
     (Expression.from_primary_expression(count()), var("concepts")),
     where=[
         values("scheme", [iri("ex:s1"), iri("ex:s2")]),
-        graph("?g", ("?concept", iri("skos:inScheme"), "?scheme")),
+        graph(var("g"), (var("concept"), iri("skos:inScheme"), var("scheme"))),
         union(
-            ("?concept", iri("skos:prefLabel"), "?label"),
-            ("?concept", iri("skos:altLabel"), "?label"),
+            (var("concept"), iri("skos:prefLabel"), var("label")),
+            (var("concept"), iri("skos:altLabel"), var("label")),
         ),
-        filter_(regex("?label", "water", "i")),
-        filter_(not_exists(("?concept", iri("owl:deprecated"), literal(True)))),
+        filter_(regex(var("label"), "water", "i")),
+        filter_(not_exists((var("concept"), iri("owl:deprecated"), literal(True)))),
     ],
     group_by=var("scheme"),
     having=Expression.compare(var("concepts"), ">", 5),
@@ -99,9 +110,9 @@ print(query.to_pretty_string())
 
 # %%
 print(modify(
-    where=[("?s", iri("ex:old"), "?o")],
-    delete=[("?s", iri("ex:old"), "?o")],
-    insert=[("?s", iri("ex:new"), "?o")],
+    where=[(var("s"), iri("ex:old"), var("o"))],
+    delete=[(var("s"), iri("ex:old"), var("o"))],
+    insert=[(var("s"), iri("ex:new"), var("o"))],
     prefixes={"ex": "http://example.com/"},
 ).to_pretty_string())
 

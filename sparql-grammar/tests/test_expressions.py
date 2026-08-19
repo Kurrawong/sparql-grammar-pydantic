@@ -196,9 +196,20 @@ class TestExpressionBuilders:
         )
 
     def test_python_values_are_lifted(self):
-        assert Expression.compare(Var("a"), "=", "text").to_string() == '?a = "text"'
         assert Expression.compare(Var("a"), "=", True).to_string() == "?a = true"
         assert Expression.compare(Var("a"), "=", 5).to_string() == "?a = 5"
+        assert Expression.compare(Var("a"), "=", -5).to_string() == "?a = -5"
+        assert Expression.compare(Var("a"), "=", 1.5).to_string() == "?a = 1.5"
+
+    def test_a_string_is_refused_here_too(self):
+        """``?a = <skos:Concept>`` and ``?a = "skos:Concept"`` are different queries."""
+        from sparql_grammar import literal
+
+        with pytest.raises(TypeError, match="never read as a term"):
+            Expression.compare(Var("a"), "=", "text")
+        assert Expression.compare(Var("a"), "=", literal("text")).to_string() == (
+            '?a = "text"'
+        )
 
     def test_from_primary_expression(self):
         # the constructor prez uses 25 times

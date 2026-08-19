@@ -10,12 +10,27 @@ Two shaping decisions worth knowing, both aimed at cutting nesting depth:
   ``Var ::= VAR1 | VAR2`` differs only by sigil, and ``iri ::= IRIREF | PrefixedName``
   splits by surface form, so one node with a sigil does the same work as two nodes.
   ``VAR1``/``VAR2``/``IRIREF`` remain available for exact-fidelity round-tripping.
+
+One consequence of the aliasing is worth spelling out, because the name reads as
+lexical rather than semantic: **``INTEGER`` is a term**. The spec has
+``VarOrTerm ::= Var | iri | RDFLiteral | NumericLiteral | ...``,
+``NumericLiteral ::= NumericLiteralUnsigned | ...`` and
+``NumericLiteralUnsigned ::= INTEGER | DECIMAL | DOUBLE``; since the two middle
+productions are bare alternations, ``INTEGER`` and its siblings appear in
+:data:`VarOrTerm` directly. A bare ``5`` in a triple is an ``INTEGER`` token per the
+grammar, and :func:`numeric_literal` is how a Python number becomes one.
+
+Note also that the signed numerics (``INTEGER_NEGATIVE`` and friends) hold *unsigned*
+text and render the sign, in keeping with the rule above - so ``-5`` is
+``INTEGER_NEGATIVE("5")``, not ``INTEGER("-5")``, whose value would not match the
+production's own pattern.
 """
 
 from __future__ import annotations
 
 import re
-from typing import ClassVar, Union
+from math import isfinite
+from typing import ClassVar, NoReturn, Union
 
 from ._base import Add, Node, alias, production
 from .terminals import (
@@ -51,6 +66,7 @@ __all__ = [
     "Var",
     "IRI",
     "iri_is_valid",
+    "numeric_literal",
     "PrefixedName",
     "String",
     "RDFLiteral",
@@ -88,6 +104,77 @@ def iri_is_valid(text: str) -> bool:
     if "\\" in text:
         return _IRI_TEXT.fullmatch(text) is not None
     return True
+
+
+def numeric_literal(value: int | float) -> Node:
+    """The numeric literal the spec spells for a Python number.
+
+    ``INTEGER``, ``DECIMAL`` and ``DOUBLE`` are all unsigned, and the signed terminals
+    hold unsigned text and render the sign - so a negative number needs the matching
+    ``*_NEGATIVE`` class rather than a minus tucked inside the value. ``DOUBLE`` is the
+    form carrying an exponent and ``DECIMAL`` the form without, which is exactly the
+    split :func:`repr` already makes.
+
+    Shared by :func:`sparql_grammar.helpers.literal`, the expression builders and the
+    rdflib bridge, so that one Python number means one SPARQL literal everywhere.
+    """
+    if isinstance(value, bool):
+        # bool is a subclass of int, and "True" is not an INTEGER
+        raise TypeError("a bool is a BooleanLiteral, not a numeric literal")
+    if isinstance(value, int):
+        return INTEGER(str(value)) if value >= 0 else INTEGER_NEGATIVE(str(-value))
+    if not isinstance(value, float):
+        raise TypeError(f"{type(value).__name__} is not a number")
+    if not isfinite(value):
+        raise ValueError(
+            f"{value!r} cannot be a SPARQL literal: the grammar has no syntax for "
+            "infinity or NaN. Write it as a typed literal if your store accepts one, "
+            'e.g. literal("INF", datatype=iri("http://www.w3.org/2001/XMLSchema#double")).'
+        )
+    text = repr(abs(value))
+    negative = value < 0 or (value == 0 and str(value)[:1] == "-")
+    if "e" in text or "E" in text:
+        return DOUBLE_NEGATIVE(text) if negative else DOUBLE(text)
+    return DECIMAL_NEGATIVE(text) if negative else DECIMAL(text)
+
+
+#: Text shaped like a prefixed name. Used only to pick the more helpful suggestion in
+#: :func:`refuse_string`; it decides nothing about what gets built.
+_PREFIXED_SHAPE = re.compile(r"[A-Za-z][\w.\-]*:\S*")
+
+
+def refuse_string(value: str, *, literals_allowed: bool = True) -> NoReturn:
+    """Refuse a bare string in a term position, naming the constructor to use.
+
+    No string is ever read as a term - not here, not in a triple, not in an
+    expression - which is the same bargain rdflib strikes with ``URIRef`` and
+    ``Literal``. The reasons:
+
+    * ``"<http://x>"`` is as plausibly a literal as an IRI, and only the caller knows;
+    * a value read as a *variable* is worse than merely wrong.
+      ``VALUES ?name { "Alice" }`` constrains a query, while
+      ``VALUES ?name { ?anything }`` removes the constraint altogether - so one
+      untrusted string starting with ``?`` would rewrite a query rather than
+      parameterise it.
+
+    The suggestion in the message is chosen from the text's shape to make the fix
+    obvious. Nothing is built from it.
+    """
+    text = value.strip()
+    shown = value if len(value) <= 60 else value[:57] + "..."
+    if text[:1] in ("?", "$"):
+        suggestion = f"var({text[1:]!r})"
+    elif text.startswith("<") and text.endswith(">"):
+        suggestion = f"iri({text[1:-1]!r})"
+    elif not literals_allowed or "://" in text or _PREFIXED_SHAPE.fullmatch(text):
+        suggestion = f"iri({text!r})"
+    else:
+        suggestion = f"literal({text!r})"
+    options = "iri(), literal() or var()" if literals_allowed else "iri() or var()"
+    raise TypeError(
+        f"{shown!r} is a str, and a str is never read as a term - probably "
+        f"{suggestion}, otherwise one of {options}."
+    )
 
 
 @production(rule="Var")

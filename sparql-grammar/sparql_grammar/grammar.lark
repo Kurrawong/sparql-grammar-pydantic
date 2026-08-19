@@ -235,7 +235,12 @@ property_list_path_not_empty: ( verb_path | verb_simple ) object_list_path prope
 
 property_list_path_not_empty_other: ";" property_list_path_not_empty_rest?
 
-property_list_path_not_empty_rest: ( verb_path | verb_simple ) object_list
+// the spec's own continuation is ObjectListPath, not ObjectList:
+//   PropertyListPathNotEmpty ::= ( VerbPath | VerbSimple ) ObjectListPath
+//                                ( ';' ( ( VerbPath | VerbSimple ) ObjectListPath )? )*
+// the grammar this file started from had ObjectList here, which the builder never
+// matched, so everything after a ';' was silently dropped
+property_list_path_not_empty_rest: ( verb_path | verb_simple ) object_list_path
 
 verb_path: path
 

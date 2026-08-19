@@ -14,8 +14,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ._base import Node
-from .terminals import ANON, BLANK_NODE_LABEL, DECIMAL, DOUBLE, INTEGER
-from .terms import IRI, BooleanLiteral, RDFLiteral, Var
+from .terminals import (
+    ANON,
+    BLANK_NODE_LABEL,
+    DECIMAL,
+    DECIMAL_NEGATIVE,
+    DECIMAL_POSITIVE,
+    DOUBLE,
+    DOUBLE_NEGATIVE,
+    DOUBLE_POSITIVE,
+    INTEGER,
+    INTEGER_NEGATIVE,
+    INTEGER_POSITIVE,
+)
+from .terms import IRI, BooleanLiteral, RDFLiteral, Var, numeric_literal
 
 if TYPE_CHECKING:  # pragma: no cover
     from rdflib.term import Identifier
@@ -71,11 +83,12 @@ def to_grammar_term(value: Any, *, typed_numerics: bool = True) -> Node:
         return _literal_to_grammar(value, typed_numerics)
     if isinstance(value, bool):
         return BooleanLiteral(value)
-    if isinstance(value, int):
-        return INTEGER(str(value))
-    if isinstance(value, float):
-        return DOUBLE(repr(value)) if "e" in repr(value).lower() else DECIMAL(repr(value))
+    if isinstance(value, (int, float)):
+        return numeric_literal(value)
     if isinstance(value, str):
+        # A Python str converts to a literal, exactly as ``rdflib.Literal("x")`` does -
+        # it is never read as an IRI. Pass ``rdflib.URIRef`` for that. This is a value
+        # converter, so the Python type decides and nothing is read out of the text.
         return RDFLiteral(value)
     raise TypeError(f"cannot convert {type(value).__name__} to a grammar term")
 
@@ -88,11 +101,11 @@ def _literal_to_grammar(value: Any, typed_numerics: bool) -> Node:
     if typed_numerics and datatype is not None:
         text = str(value)
         if datatype in _INTEGER_TYPES:
-            return INTEGER(text)
+            return _numeric_terminal("integer", text)
         if datatype in _DECIMAL_TYPES:
-            return DECIMAL(text if "." in text else f"{text}.0")
+            return _numeric_terminal("decimal", text if "." in text else f"{text}.0")
         if datatype in _DOUBLE_TYPES:
-            return DOUBLE(text if "e" in text.lower() else f"{text}e0")
+            return _numeric_terminal("double", text if "e" in text.lower() else f"{text}e0")
 
     if value.language:
         return RDFLiteral.langed(str(value), _language_with_direction(value))
@@ -101,6 +114,35 @@ def _literal_to_grammar(value: Any, typed_numerics: bool) -> Node:
     # not escaped here: RDFLiteral escapes plain text when it renders, and doing it
     # in both places would double every backslash
     return RDFLiteral(str(value))
+
+
+#: The three numeric families, each as (unsigned, positive, negative).
+_NUMERIC_CLASSES = {
+    "integer": (INTEGER, INTEGER_POSITIVE, INTEGER_NEGATIVE),
+    "decimal": (DECIMAL, DECIMAL_POSITIVE, DECIMAL_NEGATIVE),
+    "double": (DOUBLE, DOUBLE_POSITIVE, DOUBLE_NEGATIVE),
+}
+
+#: Numeric terminals grouped for the reverse direction: an integer becomes a Python
+#: int, the rest a float.
+_INTEGER_TERMINALS = _NUMERIC_CLASSES["integer"]
+_NUMERIC_TERMINALS = tuple(c for family in _NUMERIC_CLASSES.values() for c in family)
+
+
+def _numeric_terminal(kind: str, text: str) -> Node:
+    """A numeric terminal from signed text.
+
+    ``INTEGER`` and friends are unsigned in the grammar; the sign lives in the
+    ``*_POSITIVE``/``*_NEGATIVE`` productions, which hold the unsigned digits and
+    render the sign. Handing ``"-5"`` to ``INTEGER`` would build a node that renders
+    correctly but fails ``validate("terminals")``.
+    """
+    plain, positive, negative = _NUMERIC_CLASSES[kind]
+    if text.startswith("-"):
+        return negative(text[1:])
+    if text.startswith("+"):
+        return positive(text[1:])
+    return plain(text)
 
 
 def _language_with_direction(value: Any) -> str:
@@ -124,10 +166,11 @@ def from_grammar_term(node: Node) -> Identifier:
         return rdflib.BNode(node.value)
     if isinstance(node, BooleanLiteral):
         return rdflib.Literal(node.value)
-    if isinstance(node, INTEGER):
-        return rdflib.Literal(int(node.value))
-    if isinstance(node, (DECIMAL, DOUBLE)):
-        return rdflib.Literal(float(node.value))
+    if isinstance(node, _INTEGER_TERMINALS):
+        # to_string() carries the sign, which node.value deliberately does not
+        return rdflib.Literal(int(node.to_string()))
+    if isinstance(node, _NUMERIC_TERMINALS):
+        return rdflib.Literal(float(node.to_string()))
     if isinstance(node, RDFLiteral):
         return _rdf_literal_from_grammar(node, rdflib)
     if isinstance(node, ANON):

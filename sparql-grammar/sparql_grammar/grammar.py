@@ -11,8 +11,9 @@ ceiling.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-from typing import Union
+from typing import ClassVar, Union, get_args
 
 from ._base import Add, Node, alias, production
 from .expressions import (
@@ -37,7 +38,7 @@ from .terminals import (
     STRING_LITERAL1,
     STRING_LITERAL2,
 )
-from .terms import IRI, BooleanLiteral, RDFLiteral, Var
+from .terms import IRI, BooleanLiteral, NumericLiteral, RDFLiteral, Var
 
 __all__ = [
     # top level
@@ -57,7 +58,7 @@ __all__ = [
     "MinusGraphPattern", "GroupOrUnionGraphPattern", "Filter", "Bind",
     # inline data
     "InlineData", "DataBlock", "InlineDataOneVar", "InlineDataFull", "DataBlockValue",
-    "UNDEF",
+    "Undef", "UNDEF",
     # triples
     "ConstructTemplate", "ConstructTriples", "TriplesBlock", "TriplesTemplate",
     "TriplesSameSubject", "TriplesSameSubjectPath", "PropertyList",
@@ -73,9 +74,6 @@ __all__ = [
     "TripleTermDataSubject", "TripleTermDataObject", "Annotation", "AnnotationBlock",
     "AnnotationPath", "AnnotationBlockPath",
 ]
-
-#: The ``UNDEF`` marker permitted in a VALUES data block.
-UNDEF = "UNDEF"
 
 IRIish = Union[IRI, PNAME_LN, PNAME_NS]
 
@@ -711,7 +709,11 @@ class AnnotationPath(Node):
 
 # unions that need the reification classes -----------------------------------
 
-_TERM_MEMBERS = (Var, IRI, PNAME_LN, PNAME_NS, RDFLiteral, BooleanLiteral)
+#: The term productions shared by the ``*Subject``/``*Object``/``GraphNode`` unions
+#: below. ``NumericLiteral`` is itself an alias union, so the numeric terminals
+#: (``INTEGER``, ``DECIMAL``, ``DOUBLE`` and their signed forms) flatten in here: a
+#: bare ``5`` in a triple really is an ``INTEGER`` token, not a wrapper around one.
+_TERM_MEMBERS = (Var, IRI, PNAME_LN, PNAME_NS, RDFLiteral, NumericLiteral, BooleanLiteral)
 
 #: TripleTermSubject ::= Var | iri | RDFLiteral | NumericLiteral | BooleanLiteral | BlankNode | TripleTerm
 TripleTermSubject = alias(
@@ -769,18 +771,66 @@ GraphNodePath = alias(
 # Inline data (VALUES)
 # ---------------------------------------------------------------------------
 
+
+@dataclass(eq=True, slots=True, repr=False)
+class Undef(Node):
+    """The ``UNDEF`` marker of a VALUES data block.
+
+    ``UNDEF`` is a keyword inside ``DataBlockValue``, not a production of its own, so
+    this class is deliberately absent from the registry - the audit tool would
+    otherwise report it as drift against the grammar.
+
+    It is a node rather than the bare string ``"UNDEF"`` because a ``str`` member
+    widened :data:`DataBlockValue` to admit *any* string: with the union precise,
+    ``validate("full")`` can tell the marker from a value that has no business in a
+    data block. Use the :data:`UNDEF` singleton rather than constructing this.
+    """
+
+    rule: ClassVar[str] = "UNDEF"
+    __hash__ = Node.__hash__
+
+    def render(self, add: Add) -> None:
+        add("UNDEF")
+
+
+#: The ``UNDEF`` marker permitted in a VALUES data block. It carries no data, so one
+#: shared instance stands for every occurrence.
+UNDEF = Undef()
+
 #: DataBlockValue ::= iri | RDFLiteral | NumericLiteral | BooleanLiteral | 'UNDEF' | TripleTermData
+#:
+#: Note what is *not* here: ``Var``. A VALUES block supplies bindings, so a variable
+#: in a row is not a legal value, and ``InlineDataOneVar``/``InlineDataFull`` check
+#: for it under ``validate("full")``.
 DataBlockValue = alias(
     "DataBlockValue",
-    Union[IRI, PNAME_LN, PNAME_NS, RDFLiteral, BooleanLiteral, TripleTermData, str],
+    Union[
+        IRI,
+        PNAME_LN,
+        PNAME_NS,
+        RDFLiteral,
+        NumericLiteral,
+        BooleanLiteral,
+        TripleTermData,
+        Undef,
+    ],
 )
 
+#: The same union as a tuple, for ``isinstance``. Derived from the alias so the two
+#: cannot drift apart.
+_DATA_BLOCK_VALUES = get_args(DataBlockValue)
 
-def _render_data_value(value: object, add: Add) -> None:
-    if value == UNDEF:
-        add("UNDEF")
-    else:
-        value.render(add)
+
+def _check_data_values(values: list, where: str) -> list[str]:
+    """Check one row of a data block against ``DataBlockValue``."""
+    errors = []
+    for value in values:
+        if not isinstance(value, _DATA_BLOCK_VALUES):
+            errors.append(
+                f"{where}: expected a DataBlockValue (an iri, literal, numeric, "
+                f"boolean, triple term, or UNDEF), got {type(value).__name__}"
+            )
+    return errors
 
 
 @production(rule="InlineDataOneVar")
@@ -794,13 +844,19 @@ class InlineDataOneVar(Node):
         if self.values is None:
             self.values = []
 
+    def _check(self, level: str) -> list[str]:
+        errors = super()._check(level)
+        if level == "full":
+            errors.extend(_check_data_values(self.values, "InlineDataOneVar.values"))
+        return errors
+
     def render(self, add: Add) -> None:
         self.variable.render(add)
         add(" { ")
         for i, value in enumerate(self.values):
             if i:
                 add(" ")
-            _render_data_value(value, add)
+            value.render(add)
         add(" }")
 
 
@@ -819,6 +875,13 @@ class InlineDataFull(Node):
             self.variables = []
         if self.rows is None:
             self.rows = []
+
+    def _check(self, level: str) -> list[str]:
+        errors = super()._check(level)
+        if level == "full":
+            for i, row in enumerate(self.rows):
+                errors.extend(_check_data_values(row, f"InlineDataFull.rows[{i}]"))
+        return errors
 
     def render(self, add: Add) -> None:
         if not self.variables:
@@ -841,7 +904,7 @@ class InlineDataFull(Node):
             for j, value in enumerate(row):
                 if j:
                     add(" ")
-                _render_data_value(value, add)
+                value.render(add)
             add(")")
         add(" }")
 

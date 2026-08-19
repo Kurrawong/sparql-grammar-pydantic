@@ -8,7 +8,10 @@ constructors the security boundary, and there are two different jobs to do there
   Building a literal from hostile input is safe without asking for anything.
 * An IRI, a variable name and a prefixed name have **no** escape syntax. A value
   carrying ``>`` or whitespace cannot be rendered as an IRI at all, so it can only be
-  refused - which is what ``check=True`` / ``checked()`` do.
+  refused - which is what ``check=True`` does, on by default.
+* Neither of those helps if the *type* of the term is taken from the text, because
+  then the input chooses its own role in the query. So no string is ever read as a
+  term: :class:`TestTypeConfusion` is that rule under attack.
 
 These tests are written as attacks, so a regression shows up as a query whose shape
 changed rather than as a failed assertion about escaping.
@@ -21,9 +24,9 @@ import pytest
 from sparql_grammar import (
     IRI,
     RDFLiteral,
+    UNDEF,
     ValidationError,
     Var,
-    checked,
     construct,
     insert_data,
     iri,
@@ -37,7 +40,7 @@ from sparql_grammar import (
 from sparql_grammar.terminals import escape_string
 
 pytest.importorskip("lark", reason="the attacks are confirmed by re-parsing")
-from sparql_grammar.parse import parse  # noqa: E402
+from sparql_grammar.parse import SparqlSyntaxError, parse  # noqa: E402
 
 #: Values crafted to break out of the term they are placed in.
 BREAKOUT_STRINGS = [
@@ -78,7 +81,7 @@ class TestLiteralsAreEscaped:
 
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_payload_cannot_add_triples(self, payload):
-        query = select("?s", where=[("?s", iri("http://p"), literal(payload))])
+        query = select(var("s"), where=[(var("s"), iri("http://p"), literal(payload))])
         text = query.to_string()
         # the query still has exactly the one triple it was built with
         assert triple_count(text) == 1
@@ -86,7 +89,7 @@ class TestLiteralsAreEscaped:
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_payload_survives_intact(self, payload):
         """Escaping must preserve the value, not mangle it."""
-        query = select("?s", where=[("?s", iri("http://p"), literal(payload))])
+        query = select(var("s"), where=[(var("s"), iri("http://p"), literal(payload))])
         objects = [
             node
             for node in parse(query.to_string()).collect(type(literal("x")))
@@ -125,7 +128,7 @@ class TestIrisAreRefused:
     """An IRI cannot be escaped, so a bad one must be rejected."""
 
     @pytest.mark.parametrize("payload", BREAKOUT_IRIS)
-    def test_checked_refuses(self, payload):
+    def test_the_helper_refuses_hostile_iris(self, payload):
         with pytest.raises(ValidationError, match="not a valid IRI"):
             iri(payload, check=True)
 
@@ -144,7 +147,7 @@ class TestIrisAreRefused:
     def test_helpers_check_even_a_prebuilt_node(self, payload):
         """Handing a raw IRI node to a helper does not get round the check."""
         with pytest.raises(ValidationError):
-            select("?s", where=[("?s", iri("http://p"), IRI(payload))])
+            select(var("s"), where=[(var("s"), iri("http://p"), IRI(payload))])
 
     @pytest.mark.parametrize("payload", BREAKOUT_IRIS)
     def test_the_raw_production_classes_are_the_unchecked_path(self, payload):
@@ -169,7 +172,7 @@ class TestIrisAreRefused:
         with pytest.raises(ValidationError):
             _raw_triple_block(payload).validate("terminals")
 
-    def test_checked_accepts_ordinary_iris(self):
+    def test_ordinary_iris_pass(self):
         for good in [
             "http://example.com/thing",
             "https://linked.data.gov.au/def/borehole",
@@ -186,22 +189,22 @@ class TestIrisAreRefused:
 
 class TestVariableNames:
     @pytest.mark.parametrize("payload", ["s . ?x ?y ?z", "s}", "s ?p ?o", ""])
-    def test_checked_refuses_bad_names(self, payload):
+    def test_bad_names_are_refused(self, payload):
         with pytest.raises(ValidationError, match="variable name"):
             var(payload, check=True)
 
-    def test_checked_accepts_good_names(self):
-        for good in ["s", "?s", "focus_node", "v123", "_private"]:
+    def test_good_names_pass(self):
+        for good in ["s", var("s"), "focus_node", "v123", "_private"]:
             var(good, check=True)
 
 
-class TestCheckedBoundary:
-    """``checked()`` is the one call to reach for at the input boundary."""
+class TestExplicitBoundary:
+    """The term constructors are the boundary, and each one checks by default."""
 
     def test_helpers_validate_by_default(self):
-        """checked() is explicit, but term()/iri()/var() already check."""
+        """No argument is needed to be safe: iri()/var() check unless told not to."""
         with pytest.raises(ValidationError):
-            term(f"<{BREAKOUT_IRIS[0]}>")
+            iri(BREAKOUT_IRIS[0])
         with pytest.raises(ValidationError):
             var("s . ?x ?y ?z")
 
@@ -210,28 +213,77 @@ class TestCheckedBoundary:
         iri(BREAKOUT_IRIS[0], check=False)
         var("s . ?x ?y ?z", check=False)
 
-    def test_dispatches_by_shape(self):
-        assert isinstance(checked("?s"), Var)
-        assert isinstance(checked("<http://x>"), IRI)
-        assert isinstance(checked("plain text"), RDFLiteral)
-
     @pytest.mark.parametrize("payload", BREAKOUT_IRIS)
     def test_refuses_hostile_iris(self, payload):
         with pytest.raises(ValidationError):
-            checked(f"<{payload}>")
+            iri(payload)
 
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_accepts_hostile_text_because_it_is_escaped(self, payload):
-        node = checked(payload)
-        query = select("?s", where=[("?s", iri("http://p"), node)])
+        node = literal(payload)
+        query = select(var("s"), where=[(var("s"), iri("http://p"), node)])
         assert triple_count(query.to_string()) == 1
 
-    def test_equivalent_to_term_with_check(self):
-        assert checked("?s") == term("?s", check=True)
-
     def test_passes_existing_nodes_through_validation(self):
+        """A prebuilt node is not a way round the check."""
         with pytest.raises(ValidationError):
-            checked(IRI(BREAKOUT_IRIS[0]))
+            term(IRI(BREAKOUT_IRIS[0]))
+
+
+class TestTypeConfusion:
+    """The defect explicitness removes: input choosing its own term type.
+
+    While a string was read according to its shape, a caller who meant "a literal
+    from this request parameter" got whatever the parameter looked like. Two of those
+    outcomes matter, and neither is fixed by escaping or by validation:
+
+    * an IRI instead of a literal - ``VALUES ?name { <http://ex/secret> }`` asks a
+      different question than ``VALUES ?name { "Alice" }``;
+    * a *variable* instead of a literal - which does not narrow the query, it widens
+      it, so a filter meant to constrain results stops constraining anything.
+    """
+
+    def test_a_value_meant_as_a_literal_cannot_become_an_iri(self):
+        with pytest.raises(TypeError, match="never read as a term"):
+            values("name", ["<http://ex/secret>"])
+
+    def test_said_explicitly_the_same_text_is_unremarkable(self):
+        assert values("name", [literal("<http://ex/secret>")]).to_string() == (
+            'VALUES ?name { "<http://ex/secret>" }'
+        )
+
+    def test_a_value_cannot_become_a_variable(self):
+        with pytest.raises(TypeError, match="never read as a term"):
+            values("name", ["?anything"])
+
+    def test_a_var_node_is_refused_in_a_values_row_too(self):
+        """Not a coercion question: DataBlockValue has no Var in it at all."""
+        with pytest.raises(TypeError, match="terms, not variables"):
+            values("name", [var("anything")])
+
+    def test_the_grammar_agrees_that_it_is_not_sparql(self):
+        """The refusal above is the spec's, not ours - the parser rejects it as well."""
+        with pytest.raises(SparqlSyntaxError):
+            parse("SELECT * WHERE { VALUES ?name { ?anything } }")
+
+    def test_undef_is_how_a_row_is_left_unbound(self):
+        assert values("name", [UNDEF]).to_string() == "VALUES ?name { UNDEF }"
+
+    def test_the_undef_string_is_not_the_marker(self):
+        with pytest.raises(TypeError, match="UNDEF marker itself"):
+            values("name", ["UNDEF"])
+
+    @pytest.mark.parametrize(
+        "text", ["<http://x>", "?x", "$x", "a", "skos:broader", 'x" . ?s ?p ?o . #']
+    )
+    def test_a_literal_whose_text_looks_like_syntax_is_just_text(self, text):
+        query = select(var("s"), where=[(var("s"), iri("http://p"), literal(text))])
+        assert triple_count(query.to_string()) == 1
+
+    @pytest.mark.parametrize("text", ["?admin", "<http://ex/admin>", "admin"])
+    def test_the_predicate_position_guesses_nothing_either(self, text):
+        with pytest.raises(TypeError, match="never read as a term"):
+            select(var("s"), where=[(var("s"), text, var("o"))])
 
 
 class TestUpdateAndConstructPaths:
@@ -239,7 +291,7 @@ class TestUpdateAndConstructPaths:
 
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_insert_data_literal(self, payload):
-        request = insert_data([("<http://s>", iri("http://p"), literal(payload))])
+        request = insert_data([(iri("http://s"), iri("http://p"), literal(payload))])
         reparsed = parse(request.to_string())
         from sparql_grammar import TriplesSameSubject
 
@@ -248,42 +300,42 @@ class TestUpdateAndConstructPaths:
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_modify_literal(self, payload):
         request = modify(
-            where=[("?s", iri("http://p"), var("o"))],
-            insert=[("?s", iri("http://p"), literal(payload))],
+            where=[(var("s"), iri("http://p"), var("o"))],
+            insert=[(var("s"), iri("http://p"), literal(payload))],
         )
         parse(request.to_string())  # still one well-formed request
 
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_construct_template_literal(self, payload):
         query = construct(
-            [("?s", iri("http://p"), literal(payload))],
-            where=[("?s", iri("http://p"), var("o"))],
+            [(var("s"), iri("http://p"), literal(payload))],
+            where=[(var("s"), iri("http://p"), var("o"))],
         )
         parse(query.to_string())
 
     @pytest.mark.parametrize("payload", BREAKOUT_STRINGS)
     def test_values_block_literal(self, payload):
-        query = select("?v", where=[values("v", [literal(payload)])])
+        query = select(var("v"), where=[values("v", [literal(payload)])])
         assert triple_count(query.to_string()) == 0  # a VALUES block, no triples
         parse(query.to_string())
 
 
 class TestParameterisedQueryPattern:
-    """The intended shape: trusted skeleton, checked parameters."""
+    """The intended shape: a trusted skeleton, with each parameter checked."""
 
     def test_skeleton_is_reusable_and_inputs_are_checked(self):
         template = select(
-            "?s",
-            where=[("?s", iri("ex:p"), var("value"))],
+            var("s"),
+            where=[(var("s"), iri("ex:p"), var("value"))],
             prefixes={"ex": "http://ex/"},
         )
         first = template.to_string()
 
-        good = [checked(f"http://example.com/{i}") for i in range(3)]
+        good = [iri(f"http://example.com/{i}") for i in range(3)]
         assert len(good) == 3
 
         with pytest.raises(ValidationError):
-            checked(f"<{BREAKOUT_IRIS[0]}>")
+            iri(BREAKOUT_IRIS[0])
 
         # the skeleton is untouched by any of it
         assert template.to_string() == first
@@ -308,7 +360,7 @@ class TestParameterisedQueryPattern:
         for call in (
             lambda: iri(BREAKOUT_IRIS[0]),
             lambda: var("s . ?x ?y"),
-            lambda: term(f"<{BREAKOUT_IRIS[0]}>"),
+            lambda: iri(f"<{BREAKOUT_IRIS[0]}>"),
             lambda: literal("x", lang='en" . #'),
             lambda: literal("x", datatype=BREAKOUT_IRIS[0]),
         ):

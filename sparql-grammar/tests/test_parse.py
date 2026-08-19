@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,7 @@ class TestManipulation:
 
         query = parse("SELECT ?s WHERE { ?s ?p ?o }")
         ggps = query.query.query.where_clause.group_graph_pattern.content
-        ggps.add_triples([triple("?s", IRI("http://extra"), "?x")])
+        ggps.add_triples([triple(Var("s"), IRI("http://extra"), Var("x"))])
         assert "<http://extra>" in query.to_string()
 
     def test_collect_variables(self):
@@ -119,6 +120,97 @@ class TestManipulation:
         a = parse("SELECT ?s WHERE { ?s ?p ?o }")
         b = parse("SELECT ?s WHERE { ?s ?p ?o }")
         assert a == b and hash(a) == hash(b)
+
+
+#: Terminal types that carry data rather than structure. Numeric values are compared
+#: numerically and string literals by their content, so an equivalent surface form
+#: (``+1`` read as an addition, ``'x'`` rendered as ``"x"``) does not count as a change.
+_NUMERIC_TOKENS = {
+    "INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "DECIMAL_POSITIVE",
+    "DOUBLE_POSITIVE", "INTEGER_NEGATIVE", "DECIMAL_NEGATIVE", "DOUBLE_NEGATIVE",
+}
+_STRING_TOKENS = {
+    "STRING_LITERAL1": 1, "STRING_LITERAL2": 1,
+    "STRING_LITERAL_LONG1": 3, "STRING_LITERAL_LONG2": 3,
+}
+_NAME_TOKENS = {
+    "IRIREF", "PNAME_LN", "PNAME_NS", "VAR1", "VAR2", "BLANK_NODE_LABEL", "LANG_DIR",
+}
+
+
+def data_values(text: str) -> Counter:
+    """Every value a query mentions, as a multiset, straight from the lexer.
+
+    A rendered query has to mention exactly what the source did. Comparing rendered
+    *strings* cannot show this - text that has quietly lost a clause still re-renders
+    identically, which is how a dropped ``;`` continuation went unnoticed - so this
+    counts the data-carrying tokens instead and is insensitive to layout.
+    """
+    from sparql_grammar.parse import _parser
+
+    def key(token):
+        text = str(token)
+        if token.type in _NUMERIC_TOKENS:
+            return ("number", float(text))
+        if token.type in _STRING_TOKENS:
+            quote = _STRING_TOKENS[token.type]
+            return ("text", text[quote:-quote])
+        if token.type in _NAME_TOKENS:
+            return (token.type, text)
+        return None
+
+    tree = _parser("unit", "lalr").parse(text)
+    tokens = tree.scan_values(lambda v: type(v).__name__ == "Token")
+    return Counter(k for k in (key(t) for t in tokens) if k is not None)
+
+
+class TestNothingIsLost:
+    """A parse must not quietly drop part of the query.
+
+    The regression that prompted this: the grammar this parser started from spelled
+    ``PropertyListPathNotEmpty``'s continuation as ``ObjectList`` where the spec says
+    ``ObjectListPath``, so the builder never matched it and everything after a ``;``
+    disappeared. The rendered query was still valid SPARQL and still re-rendered
+    identically - it just asked for less than it was given.
+    """
+
+    @staticmethod
+    def _reparsed(query: str) -> str:
+        """The query as rendered, on one line. Safe here: no literal holds a newline."""
+        return " ".join(parse(query).to_string().split())
+
+    def test_a_predicate_list_keeps_every_predicate(self):
+        query = "SELECT * WHERE { ?s a <http://C> ; <http://n> 5 ; <http://m> ?x }"
+        assert self._reparsed(query) == query
+
+    def test_a_predicate_list_in_a_blank_node(self):
+        query = "SELECT * WHERE { [ <http://a> 1 ; <http://b> 2 ] <http://c> 3 }"
+        assert self._reparsed(query) == query
+
+    def test_a_predicate_list_with_a_path(self):
+        query = "SELECT * WHERE { ?s <http://a>/<http://b> ?x ; <http://c> ?y }"
+        assert self._reparsed(query) == query
+
+    def test_an_empty_continuation_is_the_one_thing_dropped(self):
+        """``;`` with nothing after it adds nothing, so it is not carried."""
+        assert self._reparsed("SELECT * WHERE { ?s <http://a> ?x ; }") == (
+            "SELECT * WHERE { ?s <http://a> ?x }"
+        )
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "SELECT * WHERE { ?s a <http://C> ; <http://n> 5 }",
+            "INSERT DATA { <http://s> <http://a> 1 ; <http://b> 2 }",
+            "SELECT * WHERE { ?s <http://a> ?x, ?y ; <http://b> ?z, ?w }",
+            "SELECT * WHERE { ?s <http://p> [ <http://q> ?o ; <http://r> ?p2 ] }",
+            "CONSTRUCT { ?s <http://a> 1 ; <http://b> 2 } WHERE { ?s ?p ?o }",
+            "SELECT * WHERE { ?s <http://p> ?o {| <http://a> ?x ; <http://b> ?y |} }",
+            "SELECT * WHERE { <<?s <http://p> ?o>> <http://a> 1 ; <http://b> 2 }",
+        ],
+    )
+    def test_every_value_survives_the_round_trip(self, query):
+        assert data_values(parse(query).to_string()) == data_values(query)
 
 
 class TestRoundTrip:
@@ -227,6 +319,27 @@ class TestCorpus:
                 break
         assert not failures, f"{len(failures)} corpus failures: {failures[:10]}"
 
+    def test_no_corpus_file_loses_a_value(self):
+        """Stronger than a stable render: nothing the query mentioned may vanish.
+
+        Round-trip stability cannot see a dropped clause, since the shortened query
+        renders just as stably. This compares the multiset of data-carrying tokens
+        before and after, over every file in the corpus.
+        """
+        failures = []
+        for path in self._files():
+            source = Path(path).read_text(encoding="utf-8")
+            try:
+                rendered = parse(source).to_string()
+            except Exception:  # noqa: BLE001 - covered by the test above
+                continue
+            before, after = data_values(source), data_values(rendered)
+            if before != after:
+                failures.append(
+                    f"{Path(path).name}: -{dict(before - after)} +{dict(after - before)}"
+                )
+        assert not failures, f"{len(failures)} files lost or gained a value: {failures[:5]}"
+
     def test_negative_suite_is_mostly_rejected(self):
         """Invalid queries should be refused.
 
@@ -254,10 +367,23 @@ class TestToPythonSource:
         assert source.startswith("query = QueryUnit(")
         assert "SelectQuery(" in source and "Var(" in source
 
-    def test_generated_code_rebuilds_the_query(self):
-        tree = parse("SELECT ?s WHERE { ?s <http://p> ?o } LIMIT 3")
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "SELECT ?s WHERE { ?s <http://p> ?o } LIMIT 3",
+            "SELECT * WHERE { VALUES (?a ?b) { (<http://x> UNDEF) } }",
+            "SELECT * WHERE { ?s <http://a> 1 ; <http://b> -2.5 }",
+        ],
+    )
+    def test_generated_code_rebuilds_the_query(self, query):
+        tree = parse(query)
         import sparql_grammar
 
         namespace = {name: getattr(sparql_grammar, name) for name in sparql_grammar.__all__}
         exec(to_python_source(tree), namespace)  # noqa: S102
         assert namespace["query"].to_string() == tree.to_string()
+
+    def test_the_undef_marker_is_named_not_rebuilt(self):
+        """``UNDEF`` is a singleton, so the generated code should say so."""
+        source = to_python_source(parse("SELECT * WHERE { VALUES ?a { UNDEF } }"))
+        assert "UNDEF," in source and "Undef(" not in source

@@ -40,7 +40,7 @@ query.query.query.solution_modifier.limit_offset.limit_clause.limit = INTEGER("5
 
 # add a pattern
 ggps = query.query.query.where_clause.group_graph_pattern.content
-ggps.add_pattern(filter_(regex("?label", "water", "i")))
+ggps.add_pattern(filter_(regex(var("label"), "water", "i")))
 
 print(query.to_pretty_string())
 
@@ -75,8 +75,8 @@ print(to_python_source(parse("SELECT ?s WHERE { ?s a <http://ex/C> } LIMIT 5")))
 # its classes were unhashable.
 
 # %%
-a = triple("?s", iri("ex:p"), "?o")
-b = triple("?s", iri("ex:p"), "?o")
-c = triple("?s", iri("ex:q"), "?o")
+a = triple(var("s"), iri("ex:p"), var("o"))
+b = triple(var("s"), iri("ex:p"), var("o"))
+c = triple(var("s"), iri("ex:q"), var("o"))
 print("a == b :", a == b)
 print("unique :", len({a, b, c}))

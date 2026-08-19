@@ -14,12 +14,14 @@ enabled; see `demo/`.)
 ```python
 from sparql_grammar import iri, optional, select, var
 
+concept, label, parent = var("concept"), var("label"), var("parent")
+
 query = select(
-    "?concept", "?label",
+    concept, label,
     where=[
-        ("?concept", "a", iri("skos:Concept")),
-        ("?concept", iri("skos:prefLabel"), "?label"),
-        optional(("?concept", iri("skos:broader"), "?parent")),
+        (concept, "a", iri("skos:Concept")),
+        (concept, iri("skos:prefLabel"), label),
+        optional((concept, iri("skos:broader"), parent)),
     ],
     limit=10,
     prefixes={"skos": "http://www.w3.org/2004/02/skos/core#"},
@@ -120,7 +122,7 @@ the production they build, so the tower is never spelled out by hand:
 ```python
 Expression.compare(var("count"), "=", 101)      # ?count = 101
 Expression.all_of(a, b, c)                      # a && b && c
-Expression.negate(is_blank("?node"))            # !isBLANK(?node)
+Expression.negate(is_blank(var("node")))        # !isBLANK(?node)
 PathAlternative.seq(iri("ex:a"), iri("ex:b"))   # ex:a/ex:b
 PathAlternative.mod(iri("ex:broader"), "+")     # ex:broader+
 Aggregate.count(var("x"), distinct=True)        # COUNT(DISTINCT ?x)
@@ -131,16 +133,57 @@ Aggregate.count(var("x"), distinct=True)        # COUNT(DISTINCT ?x)
 `modify`, and so on. Every one returns ordinary grammar nodes, so results stay
 inspectable, mutable and hashable.
 
-Coercion only interprets what is unambiguous: `?x` is a variable, `<...>` is an IRI,
-`"a"` in predicate position is `rdf:type`, and anything else is a literal. A bare
-`http://...` string is **not** guessed to be an IRI — use `iri()` — because that guess
-silently misreads literals that look like URLs.
+### Terms are explicit — no string is ever interpreted
+
+`var()`, `iri()` and `literal()` say which term you mean, exactly as rdflib makes you
+choose between `URIRef` and `Literal`. A bare string in a term position is a
+`TypeError`, and the message names the constructor to reach for:
+
+```python
+triple(var("s"), iri("skos:broader"), literal("x"))   # say what each one is
+triple("?s", "skos:broader", "x")                     # TypeError, three times over
+```
+
+The reason is not tidiness. Reading a string by its shape lets the *value* choose its
+role in the query:
+
+| written | read as | but the caller may have meant |
+|---|---|---|
+| `"<http://ex/admin>"` | an IRI | the literal `"<http://ex/admin>"` |
+| `"?anything"` | a variable | the literal `"?anything"` |
+| `"skos:broader"` | a literal | the IRI `skos:broader` |
+
+The variable case is the dangerous one: `VALUES ?name { "Alice" }` constrains a query,
+while `VALUES ?name { ?anything }` removes the constraint altogether — so one untrusted
+value beginning with `?` would rewrite the query rather than parameterise it. Escaping
+cannot help, because nothing is being escaped; only the caller knows the type.
+
+What still needs no ceremony:
+
+* **`int`, `float`, `bool`** — the Python type already says which literal it is, so
+  `literal(5)` is `5`, `literal(-1.5)` is `-1.5`, `literal(True)` is `true`, and
+  `literal("5")` is the string `"5"`.
+* **`"a"` in predicate position** — a SPARQL keyword for `rdf:type`, not a term.
+* **A name where the grammar allows nothing but a variable** — the projection list,
+  `BIND … AS`, the `VALUES` variable list. There is no second reading to get wrong:
+  `select("?s", …)`, `bind(expr, "?count")`, `values("x", […])`.
+* **Surface form within one type** — `iri("http://x")` renders `<http://x>` and
+  `iri("skos:broader")` renders as a prefixed name; both are IRIs either way.
+  Likewise `var("s")` and `var("?s")` are the same variable.
+
+One name that surprises people: `INTEGER` really is a term. The grammar reads
+`VarOrTerm ::= Var | iri | RDFLiteral | NumericLiteral | …`,
+`NumericLiteral ::= NumericLiteralUnsigned | …`, and
+`NumericLiteralUnsigned ::= INTEGER | DECIMAL | DOUBLE` — and because those middle
+productions are bare alternations, this library models them as union aliases, so
+`INTEGER` appears in `VarOrTerm` directly. A bare `5` in a triple is an `INTEGER` token
+per the spec, however lexical the name sounds.
 
 ## Parameterised queries, and untrusted input
 
 The usual shape is a query skeleton built once from values the program controls, with
 inputs substituted per request. That makes the term constructors the only place input
-safety matters, and there are two different jobs to do there:
+safety matters, and there are three different jobs to do there:
 
 **Text can be escaped, so it always is.** A string literal is safe to build from
 hostile input with no ceremony:
@@ -157,16 +200,21 @@ therefore validate by default:
 iri("http://x> . ?s ?p ?o . <http://y")   # ValidationError
 var("s . ?x ?y")                          # ValidationError
 literal("x", lang='en" . #')              # ValidationError
-checked(value)                            # the same, named for the boundary
 ```
 
-So the pattern is: build the skeleton from your own values, and pass each incoming
-parameter through `checked()` (or just let the helpers do it):
+**And the type of the term is never taken from the input**, per the section above — a
+parameter cannot promote itself from a literal to an IRI, or to a variable.
+
+So the pattern is: build the skeleton from your own values, and wrap each incoming
+parameter in the constructor for the term you meant. Those constructors check by
+default, so the short way is the safe way:
 
 ```python
-template = select("?s", where=[("?s", iri("ex:p"), var("value"))])   # once, trusted
+template = select(                                                    # once, trusted
+    var("s"), where=[(var("s"), iri("ex:p"), var("value"))]
+)
 ...
-row = values("value", [checked(v) for v in request_values])          # per request
+row = values("value", [iri(v) for v in request_values])               # per request
 ```
 
 Checking costs about 0.3 µs per term — a fraction of a microsecond, against the
@@ -287,6 +335,8 @@ work. The differences worth knowing:
 | `LANGTAG` | `LANG_DIR` | renamed in SPARQL 1.2, with an optional base direction |
 | `SubSelectString` | `parse()` | a real parser instead of an rdflib round-trip |
 | `?a=1` | `?a = 1` | operators render spaced, matching the spec's examples |
+| a bare string as a term | `iri()` / `literal()` / `var()` | nothing is guessed; see [Terms are explicit](#terms-are-explicit--no-string-is-ever-interpreted) |
+| `"UNDEF"` in a `VALUES` row | the `UNDEF` node | a keyword, not a value, so `DataBlockValue` can stay precise |
 
 The trailing `.` after the last triple of a block is no longer emitted; it is optional in
 the grammar.

@@ -8,9 +8,14 @@ mutated like anything else.
 
 Design rules, in case you extend this:
 
-* Coerce inputs. A ``str`` becomes a plain literal, an ``int`` an integer, a bare
-  term is lifted into whatever wrapper the slot requires. Callers should not have to
-  know that an object list wants ``ObjectPath`` entries.
+* Lift inputs, never guess them. A bare term is lifted into whatever wrapper the slot
+  requires - callers should not have to know that an object list wants ``ObjectPath``
+  entries - and a Python ``bool``/``int``/``float`` becomes the literal its own type
+  already names. A ``str`` is *not* a term: say :func:`iri`, :func:`literal` or
+  :func:`var`. Reading text as one term type or another is how a value meant as a
+  literal silently became an IRI, and one untrusted string became a query rewrite.
+  The single exception is a slot the grammar restricts to a variable (the projection
+  list, ``BIND ... AS``, the ``VALUES`` variable list), where a name is unambiguous.
 * Name things after the SPARQL concept, not the use case that prompted them, so the
   set stays small and composable: there is ``filter_`` plus ``Expression.any_of``
   rather than a bespoke helper per kind of disjunctive filter.
@@ -66,10 +71,18 @@ from .grammar import (
     TriplesBlock,
     TriplesSameSubject,
     TriplesSameSubjectPath,
+    UNDEF,
     WhereClause,
 )
-from .terminals import INTEGER, PNAME_LN, PNAME_NS
-from .terms import IRI, BooleanLiteral, RDFLiteral, Var
+from .terminals import PNAME_LN, PNAME_NS
+from .terms import (
+    IRI,
+    BooleanLiteral,
+    RDFLiteral,
+    Var,
+    numeric_literal,
+    refuse_string,
+)
 from .update import (
     DeleteClause,
     DeleteData,
@@ -85,7 +98,7 @@ from .update import (
 
 __all__ = [
     # terms
-    "var", "iri", "literal", "term", "checked",
+    "var", "iri", "literal", "term",
     # triples
     "triple", "triples", "tss", "tss_list", "tss_and_tssp",
     # patterns
@@ -167,83 +180,67 @@ def literal(
     datatype: str | Node | None = None,
     check: bool = True,
 ) -> Node:
-    """A literal term. ``bool`` and ``int`` map to their SPARQL forms.
+    """A literal term. A ``bool``, ``int`` or ``float`` maps to its SPARQL form.
+
+    ``literal("5")`` is the string ``"5"`` and ``literal(5)`` is the number ``5``:
+    the Python type says which, so nothing is read out of the text. Giving a ``lang``
+    or a ``datatype`` makes it a quoted literal regardless, since a number cannot
+    carry either.
 
     The text itself is escaped when rendered, so it is safe from untrusted input
     either way. The check - on by default, as with :func:`iri` - covers the language
     tag and the datatype IRI, which have no escape syntax and so can only be refused.
     For plain text with neither, it costs almost nothing.
     """
-    if isinstance(value, bool):
-        node: Node = BooleanLiteral(value)
-    elif isinstance(value, int):
-        node = INTEGER(str(value))
-    elif lang is not None:
-        node = RDFLiteral.langed(str(value), lang)
+    if lang is not None:
+        node: Node = RDFLiteral.langed(str(value), lang)
     elif datatype is not None:
         node = RDFLiteral.typed(str(value), datatype)
+    elif isinstance(value, bool):
+        node = BooleanLiteral(value)
+    elif isinstance(value, (int, float)):
+        node = numeric_literal(value)
     else:
         node = RDFLiteral(str(value))
     return _verify(node) if check else node
 
 
 def term(value: object, check: bool = True) -> object:
-    """Coerce a Python value or an existing node into a term node.
+    """Lift a Python value into a term node. Nodes pass through, validated by default.
 
-    Validated by default, as with :func:`iri` and :func:`var`.
-
-    Strings are only interpreted where the syntax is unambiguous: ``?x``/``$x`` is a
-    variable and ``<...>`` is an IRI. Anything else becomes a plain literal - use
-    :func:`iri` for an IRI written without angle brackets. Guessing from a ``http``
-    prefix is deliberately not done, because it silently misreads any literal that
-    happens to look like a URL.
+    A ``bool``, ``int`` or ``float`` becomes the literal its Python type already
+    names. **A ``str`` is refused**: text alone does not say which term it is, so say
+    it yourself with :func:`iri`, :func:`literal` or :func:`var`. This is the same
+    bargain rdflib strikes with ``URIRef`` and ``Literal``, for the same reason - see
+    :func:`sparql_grammar.terms.refuse_string`.
     """
     if isinstance(value, Node):
         if check:
             value.validate("terminals")
         return value
-    if isinstance(value, bool) or isinstance(value, int):
-        return literal(value, check=check)
     if isinstance(value, str):
-        text = value.strip()
-        if text[:1] in ("?", "$"):
-            return var(text, check=check)
-        if text.startswith("<") and text.endswith(">"):
-            return iri(text, check=check)
-        return literal(text, check=check)
-    return literal(value, check=check)
-
-
-def checked(value: object) -> object:
-    """Coerce an untrusted value into a term, refusing anything unrenderable.
-
-    The boundary function for parameterised queries. Build the query skeleton once
-    from values you control - it needs no checking, and checking it costs several
-    times what building it does - then pass each incoming parameter through here:
-
-        template = select("?s", where=[("?s", iri("ex:p"), var("value"))])   # trusted
-        ...
-        row = values("value", [checked(v) for v in request_values])          # untrusted
-
-    Equivalent to ``term(value)`` - which validates by default - but named so the
-    boundary is obvious at the call site. Cost is a fraction of a microsecond per
-    term, rather than the milliseconds a whole-tree ``validate()`` would take.
-    """
-    return term(value, check=True)
+        refuse_string(value)
+    if isinstance(value, (bool, int, float)):
+        return literal(value, check=check)
+    raise TypeError(
+        f"a {type(value).__name__} is not a term. Pass a grammar node, a bool, an int "
+        f"or a float, or say what it should become: iri(...), literal(...) or var(...)."
+    )
 
 
 def _predicate(value: object) -> object:
-    """A predicate slot: keep ``"a"``, paths and nodes as given; coerce strings.
+    """A predicate slot: ``"a"``, a path, a variable or an IRI.
 
-    A bare string is an IRI here rather than a literal, since a literal cannot be a
-    predicate; ``?p``/``$p`` is still a variable.
+    ``"a"`` stays a bare string because it is not a term: the grammar spells it as the
+    keyword ``PathPrimary ::= 'a'``, standing for ``rdf:type``. Any other string is
+    refused, since predicate position takes a variable or an IRI and text does not say
+    which.
     """
     if value == "a" or isinstance(value, Node):
         return value
     if isinstance(value, str):
-        text = value.strip()
-        return var(text) if text[:1] in ("?", "$") else iri(text)
-    return term(value)  # validated by default
+        refuse_string(value, literals_allowed=False)
+    return term(value)
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +249,7 @@ def _predicate(value: object) -> object:
 
 
 def triple(subject: object, predicate: object, obj: object) -> TriplesSameSubjectPath:
-    """One triple pattern, coercing all three positions."""
+    """One triple pattern. Terms must be nodes: ``var()``, ``iri()``, ``literal()``."""
     return TriplesSameSubjectPath.from_spo(
         term(subject), _predicate(predicate), term(obj)
     )
@@ -359,12 +356,16 @@ def union(*alternatives: object) -> GroupOrUnionGraphPattern:
 
 
 def graph(name: object, *patterns: object) -> GraphGraphPattern:
-    """``GRAPH <g> { ... }``"""
+    """``GRAPH ?g { ... }`` or ``GRAPH <g> { ... }``
+
+    ``name`` is a ``Var`` or an IRI - ``graph(var("g"), ...)``, ``graph(iri("http://g"),
+    ...)`` - since the grammar allows either and a string cannot say which.
+    """
     return GraphGraphPattern(term(name), _to_ggp(list(patterns)))
 
 
 def service(endpoint: object, *patterns: object, silent: bool = False) -> ServiceGraphPattern:
-    """``SERVICE <endpoint> { ... }``"""
+    """``SERVICE <endpoint> { ... }``. ``endpoint`` is an ``iri()`` or a ``var()``."""
     return ServiceGraphPattern(term(endpoint), _to_ggp(list(patterns)), silent)
 
 
@@ -374,7 +375,7 @@ def filter_(constraint: object) -> Filter:
 
 
 def bind(expression: object, as_var: object) -> Bind:
-    """``BIND(expr AS ?v)``"""
+    """``BIND(expr AS ?v)``. ``as_var`` may be a name: only a variable is legal there."""
     if not isinstance(expression, Expression):
         expression = Expression.from_primary_expression(term(expression))
     return Bind(expression, var(as_var) if isinstance(as_var, str) else as_var)
@@ -384,22 +385,43 @@ def values(variables: object, rows: Iterable) -> InlineData:
     """``VALUES`` in either form.
 
     One variable and a flat list of values gives the single-variable form; a list of
-    variables and a list of rows gives the full form.
+    variables and a list of rows gives the full form. The variable position takes a
+    name, since the grammar allows nothing else there; the values are terms.
 
         values("x", [iri("http://a"), iri("http://b")])
-        values(["a", "b"], [[iri("http://1"), literal("x")]])
+        values(["a", "b"], [[iri("http://1"), literal("x")], [iri("http://2"), UNDEF]])
     """
     if isinstance(variables, (str, Var)):
         return InlineData(
-            InlineDataOneVar(
-                var(variables), [v if isinstance(v, Node) else term(v) for v in rows]
-            )
+            InlineDataOneVar(var(variables), [_data_value(v) for v in rows])
         )
     variable_nodes = [var(v) if isinstance(v, str) else v for v in variables]
-    value_rows = [
-        [v if isinstance(v, Node) else term(v) for v in row] for row in rows
-    ]
+    value_rows = [[_data_value(v) for v in row] for row in rows]
     return InlineData(InlineDataFull(variable_nodes, value_rows))
+
+
+def _data_value(value: object) -> object:
+    """One cell of a ``VALUES`` row: a term or ``UNDEF``, and never a variable.
+
+    ``DataBlockValue ::= iri | RDFLiteral | NumericLiteral | BooleanLiteral | 'UNDEF' |
+    TripleTermData`` has no ``Var`` in it, and the omission matters: a variable here
+    does not narrow the query, it widens it.
+    """
+    if value is UNDEF:
+        return value
+    if isinstance(value, str) and value.strip() == "UNDEF":
+        raise TypeError(
+            "pass the UNDEF marker itself, not the string: "
+            "from sparql_grammar import UNDEF"
+        )
+    node = term(value)
+    if isinstance(node, Var):
+        raise TypeError(
+            f"a VALUES row holds terms, not variables, so {node.to_string()} cannot "
+            "appear in one: DataBlockValue is iri | RDFLiteral | NumericLiteral | "
+            "BooleanLiteral | UNDEF | TripleTermData."
+        )
+    return node
 
 
 def exists(*patterns: object) -> ExistsFunc:

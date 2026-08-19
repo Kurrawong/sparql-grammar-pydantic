@@ -12,11 +12,11 @@ await piplite.install(["sparql-grammar", "lark"])
 from sparql_grammar import *
 
 query = select(
-    "?s",
+    var("s"),
     where=[
-        ("?s", "a", iri("ex:Thing")),
-        optional(("?s", iri("ex:p"), "?o")),
-        union(("?s", iri("ex:a"), "?x"), ("?s", iri("ex:b"), "?x")),
+        (var("s"), "a", iri("ex:Thing")),
+        optional((var("s"), iri("ex:p"), var("o"))),
+        union((var("s"), iri("ex:a"), var("x")), (var("s"), iri("ex:b"), var("x"))),
     ],
     limit=5,
     prefixes={"ex": "http://example.com/"},
@@ -44,7 +44,7 @@ print(query.to_pretty_string(indent="    "))
 # ## Parameterised queries and untrusted input
 #
 # The usual shape is a skeleton built once from values you control, with inputs
-# substituted per request. Two different jobs at that boundary:
+# substituted per request. Three different jobs at that boundary:
 #
 # Text **can** be escaped, so it always is — a literal is safe from hostile input
 # with no ceremony.
@@ -52,7 +52,7 @@ print(query.to_pretty_string(indent="    "))
 # %%
 payload = 'x" . ?s ?p ?o . #'
 print(literal(payload).to_string())
-print(select("?s", where=[("?s", iri("http://p"), literal(payload))]).to_string())
+print(select(var("s"), where=[(var("s"), iri("http://p"), literal(payload))]).to_string())
 # still one triple: the payload could not break out
 
 # %% [markdown]
@@ -72,15 +72,29 @@ for label, call in [
         print(f"{label}: refused - {error.errors[0][:60]}")
 
 # %% [markdown]
-# So: build the skeleton from your own values, and pass each parameter through
-# `checked()`. It costs a fraction of a microsecond per term, against the
-# milliseconds a whole-tree `validate()` would take.
+# And the third job: the *type* of the term is yours to state, never inferred from the
+# input. A parameter read as a variable would not narrow the query, it would widen it —
+# `VALUES ?name { "Alice" }` asks a question, `VALUES ?name { ?anything }` asks none.
 
 # %%
-template = select("?s", where=[("?s", iri("ex:p"), var("value"))],
+for hostile in ["?anything", "<http://ex/secret>"]:
+    try:
+        values("name", [hostile])
+    except TypeError:
+        print(f"{hostile!r:22} refused - say iri(...) or literal(...) and mean it")
+# said explicitly, the same text is just text
+print(values("name", [literal("?anything")]).to_string())
+
+# %% [markdown]
+# So: build the skeleton from your own values, and wrap each parameter in the
+# constructor for the term you meant. Checking costs a fraction of a microsecond per
+# term, against the milliseconds a whole-tree `validate()` would take.
+
+# %%
+template = select(var("s"), where=[(var("s"), iri("ex:p"), var("value"))],
                   prefixes={"ex": "http://example.com/"})
 inputs = ["http://example.com/a", "http://example.com/b"]
-print(values("value", [checked(v) for v in inputs]).to_string())
+print(values("value", [iri(v) for v in inputs]).to_string())
 print()
 print(template.to_string())
 

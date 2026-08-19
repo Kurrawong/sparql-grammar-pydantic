@@ -111,13 +111,20 @@ class TestNamespaces:
 
 class TestCoreHasNoRdflibDependency:
     def test_core_modules_do_not_import_rdflib(self):
-        """rdflib is only ever imported from rdflib_compat, and lazily."""
+        """rdflib is only ever imported from rdflib_compat, and lazily.
+
+        Matched on import statements rather than the word: other modules are free to
+        mention rdflib in a docstring, and several do, since its ``URIRef``/``Literal``
+        split is the precedent for requiring explicit terms.
+        """
+        import re
         from pathlib import Path
 
         package = Path(__file__).resolve().parent.parent / "sparql_grammar"
+        imports = re.compile(r"^\s*(?:import rdflib|from rdflib)", re.MULTILINE)
         offenders = [
             path.name
             for path in package.glob("*.py")
-            if path.name != "rdflib_compat.py" and "rdflib" in path.read_text()
+            if path.name != "rdflib_compat.py" and imports.search(path.read_text())
         ]
         assert offenders == []

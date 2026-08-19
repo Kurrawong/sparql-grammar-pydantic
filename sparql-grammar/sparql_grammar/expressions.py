@@ -39,7 +39,14 @@ from .terminals import (
     STRING_LITERAL_LONG1,
     STRING_LITERAL_LONG2,
 )
-from .terms import IRI, BooleanLiteral, RDFLiteral, Var
+from .terms import (
+    IRI,
+    BooleanLiteral,
+    RDFLiteral,
+    Var,
+    numeric_literal,
+    refuse_string,
+)
 
 __all__ = [
     "Expression",
@@ -310,13 +317,19 @@ class ConditionalOrExpression(Node):
 
     @staticmethod
     def _to_primary(value: object) -> object:
-        """Accept a bare term, a built-in call, or an already-wrapped expression."""
+        """Accept a bare term, a built-in call, or an already-wrapped expression.
+
+        A ``bool``, ``int`` or ``float`` becomes the literal its Python type names. A
+        ``str`` is refused for the same reason it is refused in a triple: comparing
+        against ``skos:Concept`` and comparing against ``"skos:Concept"`` are different
+        queries, and only the caller knows which was meant.
+        """
         if isinstance(value, str):
-            return RDFLiteral(value)
+            refuse_string(value)
         if isinstance(value, bool):
             return BooleanLiteral(value)
-        if isinstance(value, int):
-            return INTEGER(str(value))
+        if isinstance(value, (int, float)):
+            return numeric_literal(value)
         if isinstance(value, ConditionalOrExpression):
             return BrackettedExpression(value)
         return value
