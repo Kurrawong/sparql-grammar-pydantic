@@ -1,0 +1,184 @@
+<!doctype html>
+<!--
+  Runnable examples in a plain page. Unlike the JupyterLite site next door, there is
+  no notebook and no IDE here: PyScript boots one Pyodide interpreter, installs the
+  wheels listed in files/pyscript.json, and every editor below shares it.
+
+  Serve it with `just embed` - the package list uses absolute paths, so demo/ has to
+  be the server root.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Editors run in a worker, and reaching `window`/`document` from a worker needs
+      SharedArrayBuffer, which needs cross-origin isolation. mini-coi is a service
+      worker that supplies the COOP/COEP headers, so this works on a plain static
+      host - GitHub Pages included. It must be same-origin, hence the local copy,
+      and must load before anything else.
+    -->
+    <script src="/mini-coi.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sparql-grammar — runnable examples</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2026.7.3/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2026.7.3/core.js"></script>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0 auto;
+        padding: 2rem 1.25rem 6rem;
+        max-width: 46rem;
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+      h2 { font-size: 1.1rem; margin: 2.5rem 0 .5rem; }
+      .lede { color: #666; margin-top: 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+      p code { background: #8881; padding: .1em .3em; border-radius: 3px; }
+      .boot {
+        margin: 1.5rem 0;
+        padding: .6rem .9rem;
+        border-left: 3px solid #f0b429;
+        background: #f0b4291a;
+        font-size: .9rem;
+      }
+      .boot[hidden] { display: none; }
+      .py-editor-box { margin: .75rem 0; }
+      /* printed SPARQL is aligned, so the output has to be monospaced to read right */
+      .py-editor-output {
+        margin: 0;
+        padding: .6rem .9rem;
+        border-left: 3px solid #8884;
+        background: #8881;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: .85rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-x: auto;
+      }
+      .py-editor-output:empty { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>sparql-grammar</h1>
+    <p class="lede">
+      Typed Python objects for the SPARQL 1.2 grammar. Every example below is
+      editable — change it and press the run button, or Shift+Enter.
+    </p>
+
+    <p class="boot" id="boot">
+      Downloading the Python runtime (~10&nbsp;MB, once). The run buttons appear when
+      it is ready.
+    </p>
+
+    <!--
+      Runs once, before any editor below, and renders nothing itself.
+
+      The install happens here rather than in a PyScript `config` because editors run
+      in a worker, where micropip cannot resolve a root-relative URL - it needs the
+      origin spelled out. Reading files/pyscript.json at runtime also keeps the wheel
+      version out of this file; `just wheels` regenerates it.
+    -->
+    <script type="py-editor" env="demo" setup>
+      import pyodide_js
+
+      # micropip ships with Pyodide but is only loaded automatically when a PyScript
+      # `config` declares packages, and this page has no config - see above.
+      await pyodide_js.loadPackage("micropip")
+
+      import micropip
+      from pyscript import document, fetch, window
+
+      base = window.location.origin
+      manifest = await (await fetch(f"{base}/files/pyscript.json")).json()
+      await micropip.install([base + path for path in manifest["packages"]])
+
+      import sparql_grammar
+      from sparql_grammar.parse import parse
+
+      # `from sparql_grammar import *` is not usable here: PyScript wraps editor code
+      # in a function to allow top-level await, and a star import inside a function is
+      # a syntax error. The effect is the same.
+      globals().update({name: getattr(sparql_grammar, name) for name in sparql_grammar.__all__})
+
+      document.getElementById("boot").hidden = True
+    </script>
+
+    <h2>Build a query</h2>
+    <p>
+      The helpers assemble the productions for you, so a query is a nested literal
+      rather than a tower of constructors.
+    </p>
+    <script type="py-editor" env="demo">
+      query = select(
+          var("concept"),
+          var("label"),
+          where=[
+              (var("concept"), "a", iri("skos:Concept")),
+              (var("concept"), iri("skos:prefLabel"), var("label")),
+              optional((var("concept"), iri("skos:broader"), var("parent"))),
+          ],
+          limit=10,
+          prefixes={"skos": "http://www.w3.org/2004/02/skos/core#"},
+      )
+
+      print(query.to_pretty_string())
+    </script>
+
+    <h2>Terms are explicit</h2>
+    <p>
+      No string is ever read as a term. <code>var()</code>, <code>iri()</code> and
+      <code>literal()</code> say which one you mean, the way rdflib makes you choose
+      between <code>URIRef</code> and <code>Literal</code>. The text alone cannot
+      tell you — <code>"&lt;http://x&gt;"</code> is as plausibly a literal as an IRI,
+      and a value read as a <em>variable</em> would widen a query rather than
+      parameterise it. Python values that already carry a type pass straight through,
+      and <code>a</code> stays the <code>rdf:type</code> keyword rather than a term.
+    </p>
+    <script type="py-editor" env="demo">
+      # values that already say what they are, or carry their type in Python
+      for value in [var("s"), iri("http://ex/p"), literal("http://ex/p"), 42, -1.5, True]:
+          print(f"{str(value):24} {type(term(value)).__name__}")
+
+      print()
+
+      # a bare string in a term position is refused, and the error names the fix
+      for text in ["?s", "<http://ex/p>", "hello"]:
+          try:
+              term(text)
+          except TypeError as error:
+              print(f"{text!r:16} {error}")
+    </script>
+
+    <h2>Parse, then change it</h2>
+    <p>
+      Parsing gives back an ordinary object tree, so you can walk it, search it and
+      edit it in place instead of rebuilding the query from scratch.
+    </p>
+    <script type="py-editor" env="demo">
+      query = parse("""
+          PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+          SELECT ?concept ?label
+          WHERE {
+              ?concept a skos:Concept ;
+                       skos:prefLabel ?label .
+          }
+          LIMIT 10
+      """)
+
+      print("variables:", sorted({v.value for v in query.collect(Var)}))
+
+      # raise the limit, then add a filter
+      query.query.query.solution_modifier.limit_offset.limit_clause.limit = INTEGER("500")
+      ggps = query.query.query.where_clause.group_graph_pattern.content
+      ggps.add_pattern(filter_(regex(var("label"), "water", "i")))
+
+      print(query.to_pretty_string())
+    </script>
+
+    <p style="margin-top: 3rem; font-size: .9rem; color: #666;">
+      Want a file browser, multiple notebooks and a persistent kernel instead?
+      That is the <a href="/lab/index.html">JupyterLite build</a>.
+    </p>
+  </body>
+</html>

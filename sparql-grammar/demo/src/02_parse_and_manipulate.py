@@ -6,9 +6,14 @@
 # rebuild it.
 
 # %%
-import piplite
+# In the browser this fetches the wheels; outside Pyodide there is no piplite and
+# the package is already installed, so the cell does nothing.
+try:
+    import piplite
 
-await piplite.install(["sparql-grammar", "lark"])
+    await piplite.install(["sparql-grammar", "lark"])
+except ModuleNotFoundError:
+    pass
 
 # %%
 from sparql_grammar import *
